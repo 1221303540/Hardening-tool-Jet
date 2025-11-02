@@ -3,7 +3,7 @@
 import pyodbc
 import getpass
 import platform
-from utils import print_separator, print_check_result
+from utils import write_to_file, format_check_result
 
 if platform.system() == "Windows": # Import winreg only if on Windows
     try:
@@ -18,7 +18,8 @@ def run_all_checks(config, utils):
     Connects to MS-SQL and runs all MS-SQL specific checks.
     """
     write_to_file = utils.write_to_file # Get helper from main
-    
+    report_log = []
+
     try:
         # --- 1. Get Config ---
         server = config.get('server', 'localhost')
@@ -47,26 +48,26 @@ def run_all_checks(config, utils):
         write_to_file("Connected successfully.\n")
 
         # --- 4. Run All Checks ---
-        check_xp_cmdshell(cursor)
-        check_clr_enabled(cursor)
-        check_ad_hoc_queries(cursor)
-        check_database_mail(cursor)
-        check_ole_automation(cursor)
-        check_sa_login(cursor)
-        check_sa_renamed(cursor)
-        check_authentication_mode(cursor)
-        review_sql_logins(cursor)
-        check_linked_servers(cursor)
-        check_current_connection_encryption(cursor)
-        check_sysadmin_members(cursor)
+        check_xp_cmdshell(cursor, report_log, utils)
+        check_clr_enabled(cursor, report_log, utils)
+        check_ad_hoc_queries(cursor, report_log, utils)
+        check_database_mail(cursor, report_log, utils)
+        check_ole_automation(cursor, report_log, utils)
+        check_sa_login(cursor, report_log, utils)
+        check_sa_renamed(cursor, report_log, utils)
+        check_authentication_mode(cursor, report_log, utils)
+        review_sql_logins(cursor, report_log, utils)
+        check_linked_servers(cursor, report_log, utils)
+        check_current_connection_encryption(cursor, report_log, utils)
+        check_sysadmin_members(cursor, report_log, utils)
         
         # ... (winreg check for tls) ...
             
-        check_login_auditing(cursor)
-        check_sql_server_audit(cursor)
-        check_tde_encryption(cursor)
-        check_backup_encryption(cursor)
-        check_network_exposure()
+        check_login_auditing(cursor, report_log, utils)
+        check_sql_server_audit(cursor, report_log, utils)
+        check_tde_encryption(cursor, report_log, utils)
+        check_backup_encryption(cursor, report_log, utils)
+        check_network_exposure(report_log, utils)
 
         # --- 5. Cleanup ---
         cursor.close()
@@ -77,10 +78,20 @@ def run_all_checks(config, utils):
     except Exception as e:
         write_to_file(f"[CRITICAL] Unexpected error in MS-SQL checker: {e}")
 
+    return report_log
+
 # ---------- Check if xp_cmdshell is enabled ----------
-def check_xp_cmdshell(cursor):
-    print_separator()
-    print("--- Checking xp_cmdshell ---")
+def check_xp_cmdshell(cursor, report_log, utils):
+    """
+    Checks if xp_cmdshell is enabled.
+    Results are added to the report_log list.
+    """
+    # Get the formatting function
+    format_check_result = utils.format_check_result
+    
+    report_log.append("\n" + "-"*60)
+    report_log.append("--- Checking xp_cmdshell ---")
+    
     try:
         cursor.execute("""
             SELECT CAST(value_in_use AS INT)
@@ -91,21 +102,38 @@ def check_xp_cmdshell(cursor):
         if row:
             status = row[0]
             if status == 1:
-                print_check_result("xp_cmdshell Status", "ENABLED",
-                                   "Disable if not explicitly required. Allows OS command execution.", "CRIT")
+                report_log.append(
+                    format_check_result("xp_cmdshell Status", "ENABLED",
+                                       "Disable if not explicitly required. Allows OS command execution.", "CRIT")
+                )
             else:
-                print_check_result("xp_cmdshell Status", "Disabled", "", "GOOD")
+                report_log.append(
+                    format_check_result("xp_cmdshell Status", "Disabled", "", "GOOD")
+                )
         else:
-            print_check_result("xp_cmdshell Status", "Could not determine status.", "Check query/permissions.", "INFO")
+            report_log.append(
+                format_check_result("xp_cmdshell Status", "Could not determine status.", "Check query/permissions.", "INFO")
+            )
     except pyodbc.Error as ex:
-        print_check_result("xp_cmdshell Status", f"Error checking: {ex}", "Check permissions/query.", "WARN")
+        report_log.append(
+            format_check_result("xp_cmdshell Status", f"Error checking: {ex}", "Check permissions/query.", "WARN")
+        )
     except Exception as e:
-         print_check_result("xp_cmdshell Status", f"Unexpected error: {e}", "", "WARN")
+        report_log.append(
+            format_check_result("xp_cmdshell Status", f"Unexpected error: {e}", "", "WARN")
+        )
 
 # ---------- Check if CLR is enabled ----------
-def check_clr_enabled(cursor):
-    print_separator()
-    print("--- Checking CLR Integration ---")
+def check_clr_enabled(cursor, report_log, utils):
+    """
+    Checks if CLR is enabled.
+    Results are added to the report_log list.
+    """
+    format_check_result = utils.format_check_result
+    
+    report_log.append("\n" + "-"*60)
+    report_log.append("--- Checking CLR Integration ---")
+    
     try:
         cursor.execute("""
             SELECT CAST(value_in_use AS INT)
@@ -116,24 +144,38 @@ def check_clr_enabled(cursor):
         if row:
             status = row[0]
             if status == 1:
-                 print_check_result("CLR Integration", "ENABLED",
-                                   "Disable if not using CLR assemblies. Increases attack surface.", "WARN")
+                report_log.append(
+                    format_check_result("CLR Integration", "ENABLED",
+                                       "Disable if not using CLR assemblies. Increases attack surface.", "WARN")
+                )
             else:
-                 print_check_result("CLR Integration", "Disabled", "", "GOOD")
+                report_log.append(
+                    format_check_result("CLR Integration", "Disabled", "", "GOOD")
+                )
         else:
-            print_check_result("CLR Integration", "Could not determine status.", "Check query/permissions.", "INFO")
+            report_log.append(
+                format_check_result("CLR Integration", "Could not determine status.", "Check query/permissions.", "INFO")
+            )
     except pyodbc.Error as ex:
-        print_check_result("CLR Integration", f"Error checking: {ex}", "Check permissions/query.", "WARN")
+        report_log.append(
+            format_check_result("CLR Integration", f"Error checking: {ex}", "Check permissions/query.", "WARN")
+        )
     except Exception as e:
-         print_check_result("CLR Integration", f"Unexpected error: {e}", "", "WARN")
+        report_log.append(
+            format_check_result("CLR Integration", f"Unexpected error: {e}", "", "WARN")
+        )
 
 # ---------- Check for Ad Hoc Distributed Queries ----------
-def check_ad_hoc_queries(cursor):
+def check_ad_hoc_queries(cursor, report_log, utils):
     """
     Checks CIS 2.1: Ensure 'Ad Hoc Distributed Queries' is set to '0'
+    Results are added to the report_log list.
     """
-    print_separator()
-    print("--- Checking Ad Hoc Distributed Queries (CIS 2.1) ---")
+    format_check_result = utils.format_check_result
+    
+    report_log.append("\n" + "-"*60)
+    report_log.append("--- Checking Ad Hoc Distributed Queries (CIS 2.1) ---")
+    
     try:
         # This query is from the CIS Benchmark Audit Procedure
         cursor.execute("""
@@ -145,24 +187,38 @@ def check_ad_hoc_queries(cursor):
         if row:
             status = row[0]
             if status == 1:
-                print_check_result("Ad Hoc Distributed Queries", "ENABLED",
-                                   "Disable this. It allows users to query external data sources, increasing risk.", "CRIT")
+                report_log.append(
+                    format_check_result("Ad Hoc Distributed Queries", "ENABLED",
+                                       "Disable this. It allows users to query external data sources, increasing risk.", "CRIT")
+                )
             else:
-                print_check_result("Ad Hoc Distributed Queries", "Disabled", "", "GOOD")
+                report_log.append(
+                    format_check_result("Ad Hoc Distributed Queries", "Disabled", "", "GOOD")
+                )
         else:
-            print_check_result("Ad Hoc Distributed Queries", "Could not determine status.", "Check query/permissions.", "INFO")
+            report_log.append(
+                format_check_result("Ad Hoc Distributed Queries", "Could not determine status.", "Check query/permissions.", "INFO")
+            )
     except pyodbc.Error as ex:
-        print_check_result("Ad Hoc Distributed Queries", f"Error checking: {ex}", "Check permissions/query.", "WARN")
+        report_log.append(
+            format_check_result("Ad Hoc Distributed Queries", f"Error checking: {ex}", "Check permissions/query.", "WARN")
+        )
     except Exception as e:
-        print_check_result("Ad Hoc Distributed Queries", f"Unexpected error: {e}", "", "WARN")
+        report_log.append(
+            format_check_result("Ad Hoc Distributed Queries", f"Unexpected error: {e}", "", "WARN")
+        )
 
 # ---------- Check if Database Mail XPs is enabled ----------
-def check_database_mail(cursor):
+def check_database_mail(cursor, report_log, utils):
     """
     Checks CIS 2.4: Ensure 'Database Mail XPs' is set to '0'
+    Results are added to the report_log list.
     """
-    print_separator()
-    print("--- Checking Database Mail XPs (CIS 2.4) ---")
+    format_check_result = utils.format_check_result
+    
+    report_log.append("\n" + "-"*60)
+    report_log.append("--- Checking Database Mail XPs (CIS 2.4) ---")
+    
     try:
         # This query is from the CIS Benchmark Audit Procedure
         cursor.execute("""
@@ -174,24 +230,38 @@ def check_database_mail(cursor):
         if row:
             status = row[0]
             if status == 1:
-                print_check_result("Database Mail XPs", "ENABLED",
-                                   "Disable if not required. Can be used to exfiltrate data.", "WARN")
+                report_log.append(
+                    format_check_result("Database Mail XPs", "ENABLED",
+                                       "Disable if not required. Can be used to exfiltrate data.", "WARN")
+                )
             else:
-                print_check_result("Database Mail XPs", "Disabled", "", "GOOD")
+                report_log.append(
+                    format_check_result("Database Mail XPs", "Disabled", "", "GOOD")
+                )
         else:
-            print_check_result("Database Mail XPs", "Could not determine status.", "Check query/permissions.", "INFO")
+            report_log.append(
+                format_check_result("Database Mail XPs", "Could not determine status.", "Check query/permissions.", "INFO")
+            )
     except pyodbc.Error as ex:
-        print_check_result("Database Mail XPs", f"Error checking: {ex}", "Check permissions/query.", "WARN")
+        report_log.append(
+            format_check_result("Database Mail XPs", f"Error checking: {ex}", "Check permissions/query.", "WARN")
+        )
     except Exception as e:
-        print_check_result("Database Mail XPs", f"Unexpected error: {e}", "", "WARN")
+        report_log.append(
+            format_check_result("Database Mail XPs", f"Unexpected error: {e}", "", "WARN")
+        )
 
 # ---------- Check if Ole Automation Procedures is enabled ----------
-def check_ole_automation(cursor):
+def check_ole_automation(cursor, report_log, utils):
     """
     Checks CIS 2.5: Ensure 'Ole Automation Procedures' is set to '0'
+    Results are added to the report_log list.
     """
-    print_separator()
-    print("--- Checking Ole Automation Procedures (CIS 2.5) ---")
+    format_check_result = utils.format_check_result
+    
+    report_log.append("\n" + "-"*60)
+    report_log.append("--- Checking Ole Automation Procedures (CIS 2.5) ---")
+    
     try:
         # This query is from the CIS Benchmark Audit Procedure
         cursor.execute("""
@@ -203,21 +273,38 @@ def check_ole_automation(cursor):
         if row:
             status = row[0]
             if status == 1:
-                print_check_result("Ole Automation Procedures", "ENABLED",
-                                   "Disable this. Critical risk. Allows SQL to run external OS functions.", "CRIT")
+                report_log.append(
+                    format_check_result("Ole Automation Procedures", "ENABLED",
+                                       "Disable this. Critical risk. Allows SQL to run external OS functions.", "CRIT")
+                )
             else:
-                print_check_result("Ole Automation Procedures", "Disabled", "", "GOOD")
+                report_log.append(
+                    format_check_result("Ole Automation Procedures", "Disabled", "", "GOOD")
+                )
         else:
-            print_check_result("Ole Automation Procedures", "Could not determine status.", "Check query/permissions.", "INFO")
+            report_log.append(
+                format_check_result("Ole Automation Procedures", "Could not determine status.", "Check query/permissions.", "INFO")
+            )
     except pyodbc.Error as ex:
-        print_check_result("Ole Automation Procedures", f"Error checking: {ex}", "Check permissions/query.", "WARN")
+        report_log.append(
+            format_check_result("Ole Automation Procedures", f"Error checking: {ex}", "Check permissions/query.", "WARN")
+        )
     except Exception as e:
-        print_check_result("Ole Automation Procedures", f"Unexpected error: {e}", "", "WARN")
+        report_log.append(
+            format_check_result("Ole Automation Procedures", f"Unexpected error: {e}", "", "WARN")
+        )
 
 # ---------- Check sa login status ----------
-def check_sa_login(cursor):
-    print_separator()
-    print("--- Checking 'sa' Login Status ---")
+def check_sa_login(cursor, report_log, utils):
+    """
+    Checks sa login status.
+    Results are added to the report_log list.
+    """
+    format_check_result = utils.format_check_result
+    
+    report_log.append("\n" + "-"*60)
+    report_log.append("--- Checking 'sa' Login Status ---")
+    
     try:
         # Use SID 0x01 which is always 'sa'
         cursor.execute("""
@@ -228,25 +315,39 @@ def check_sa_login(cursor):
         row = cursor.fetchone()
         if row:
             if row.is_disabled:
-                 print_check_result("'sa' Account Status", "Disabled", "", "GOOD")
+                report_log.append(
+                    format_check_result("'sa' Account Status", "Disabled", "", "GOOD")
+                )
             else:
-                 print_check_result("'sa' Account Status", f"ENABLED (Login: {row.name})",
-                                   "Disable 'sa' and use specific admin accounts. Rename if must be enabled.", "CRIT")
+                report_log.append(
+                    format_check_result("'sa' Account Status", f"ENABLED (Login: {row.name})",
+                                       "Disable 'sa' and use specific admin accounts. Rename if must be enabled.", "CRIT")
+                )
         else:
             # This should realistically never happen for SID 0x01
-            print_check_result("'sa' Account Status", "Not found (unexpected).", "", "WARN")
+            report_log.append(
+                format_check_result("'sa' Account Status", "Not found (unexpected).", "", "WARN")
+            )
     except pyodbc.Error as ex:
-        print_check_result("'sa' Account Status", f"Error checking: {ex}", "Check permissions.", "WARN")
+        report_log.append(
+            format_check_result("'sa' Account Status", f"Error checking: {ex}", "Check permissions.", "WARN")
+        )
     except Exception as e:
-         print_check_result("'sa' Account Status", f"Unexpected error: {e}", "", "WARN")
+        report_log.append(
+            format_check_result("'sa' Account Status", f"Unexpected error: {e}", "", "WARN")
+        )
 
 # ---------- Check if 'sa' login is renamed ----------
-def check_sa_renamed(cursor):
+def check_sa_renamed(cursor, report_log, utils):
     """
     Checks CIS 2.14: Ensure the 'sa' Login Account has been renamed
+    Results are added to the report_log list.
     """
-    print_separator()
-    print("--- Checking 'sa' Login Name (CIS 2.14) ---")
+    format_check_result = utils.format_check_result
+    
+    report_log.append("\n" + "-"*60)
+    report_log.append("--- Checking 'sa' Login Name (CIS 2.14) ---")
+    
     try:
         # This query finds the login with the 'sa' SID (0x01)
         # and checks its current name.
@@ -259,25 +360,39 @@ def check_sa_renamed(cursor):
         if row:
             sa_name = row[0]
             if sa_name.lower() == 'sa':
-                print_check_result("'sa' Account Name", f"NOT Renamed (Name is 'sa')",
-                                   "Rename the 'sa' account to a non-default name to reduce brute-force attacks.", "WARN")
+                report_log.append(
+                    format_check_result("'sa' Account Name", f"NOT Renamed (Name is 'sa')",
+                                       "Rename the 'sa' account to a non-default name to reduce brute-force attacks.", "WARN")
+                )
             else:
-                print_check_result("'sa' Account Name", f"Renamed (Name is '{sa_name}')", "", "GOOD")
+                report_log.append(
+                    format_check_result("'sa' Account Name", f"Renamed (Name is '{sa_name}')", "", "GOOD")
+                )
         else:
             # This should realistically never happen
-            print_check_result("'sa' Account Name", "Could not find 'sa' principal (sid 0x01).", "", "INFO")
+            report_log.append(
+                format_check_result("'sa' Account Name", "Could not find 'sa' principal (sid 0x01).", "", "INFO")
+            )
     except pyodbc.Error as ex:
-        print_check_result("'sa' Account Name", f"Error checking: {ex}", "Check permissions.", "WARN")
+        report_log.append(
+            format_check_result("'sa' Account Name", f"Error checking: {ex}", "Check permissions.", "WARN")
+        )
     except Exception as e:
-        print_check_result("'sa' Account Name", f"Unexpected error: {e}", "", "WARN")
+        report_log.append(
+            format_check_result("'sa' Account Name", f"Unexpected error: {e}", "", "WARN")
+        )
 
 # ---------- Check Server Authentication Mode ----------
-def check_authentication_mode(cursor):
+def check_authentication_mode(cursor, report_log, utils):
     """
     Checks CIS 3.1: Ensure 'Server Authentication' is set to 'Windows Authentication Mode'
+    Results are added to the report_log list.
     """
-    print_separator()
-    print("--- Checking Server Authentication Mode (CIS 3.1) ---")
+    format_check_result = utils.format_check_result
+    
+    report_log.append("\n" + "-"*60)
+    report_log.append("--- Checking Server Authentication Mode (CIS 3.1) ---")
+    
     try:
         # This query is from the CIS Benchmark Audit Procedure
         # 1 = Windows Authentication Mode
@@ -292,21 +407,38 @@ def check_authentication_mode(cursor):
         if row:
             status = row[0]
             if status == 1:
-                print_check_result("Server Authentication", "Windows Authentication Mode", "", "GOOD")
+                report_log.append(
+                    format_check_result("Server Authentication", "Windows Authentication Mode", "", "GOOD")
+                )
             else:
-                print_check_result("Server Authentication", "Mixed Mode (Windows and SQL Authentication)",
-                                   "Use 'Windows Authentication Mode' only. Mixed Mode is less secure and increases attack surface.", "WARN")
+                report_log.append(
+                    format_check_result("Server Authentication", "Mixed Mode (Windows and SQL Authentication)",
+                                       "Use 'Windows Authentication Mode' only. Mixed Mode is less secure and increases attack surface.", "WARN")
+                )
         else:
-            print_check_result("Server Authentication", "Could not determine status.", "Check query/permissions.", "INFO")
+            report_log.append(
+                format_check_result("Server Authentication", "Could not determine status.", "Check query/permissions.", "INFO")
+            )
     except pyodbc.Error as ex:
-        print_check_result("Server Authentication", f"Error checking: {ex}", "Check permissions/query.", "WARN")
+        report_log.append(
+            format_check_result("Server Authentication", f"Error checking: {ex}", "Check permissions/query.", "WARN")
+        )
     except Exception as e:
-        print_check_result("Server Authentication", f"Unexpected error: {e}", "", "WARN")
+        report_log.append(
+            format_check_result("Server Authentication", f"Unexpected error: {e}", "", "WARN")
+        )
 
 # ---------- Review SQL logins ----------
-def review_sql_logins(cursor):
-    print_separator()
-    print("--- Reviewing Logins ---")
+def review_sql_logins(cursor, report_log, utils):
+    """
+    Reviews SQL logins.
+    Results are added to the report_log list.
+    """
+    format_check_result = utils.format_check_result
+    
+    report_log.append("\n" + "-"*60)
+    report_log.append("--- Reviewing Logins ---")
+    
     try:
         cursor.execute("""
             SELECT name, is_disabled,
@@ -317,66 +449,94 @@ def review_sql_logins(cursor):
             ORDER BY name; -- Added for consistent output
         """)
         logins = cursor.fetchall()
-        print(f"[INFO] Found {len(logins)} total logins.")
-        print("-" * 40)
+        report_log.append(f"[INFO] Found {len(logins)} total logins.")
+        report_log.append("-" * 40)
         if not logins:
-             print("   No logins found (or insufficient permissions).")
-             return
+            report_log.append("   No logins found (or insufficient permissions).")
+            return
 
         for row in logins:
             name, is_disabled, is_policy_checked, is_expiration_checked, type_desc = row
             status_notes = []
             if is_disabled: status_notes.append("DISABLED")
 
-            print(f"   Login: {name} ({type_desc}) {'[' + ', '.join(status_notes) + ']' if status_notes else ''}")
+            report_log.append(f"   Login: {name} ({type_desc}) {'[' + ', '.join(status_notes) + ']' if status_notes else ''}")
 
             if type_desc == 'SQL_LOGIN':
                 policy_status = "Yes" if is_policy_checked else "No"
                 exp_status = "Yes" if is_expiration_checked else "No"
-                print(f"      Password Policy Enforced: {policy_status}")
-                print(f"      Password Expiration Enabled: {exp_status}")
+                report_log.append(f"      Password Policy Enforced: {policy_status}")
+                report_log.append(f"      Password Expiration Enabled: {exp_status}")
                 if not is_disabled and name != 'sa' and (not is_policy_checked or not is_expiration_checked):
-                     print("      └── [WARN] Recommend enforcing policy and expiration for active SQL logins.")
+                    report_log.append("      └── [WARN] Recommend enforcing policy and expiration for active SQL logins.")
             elif type_desc.startswith('WINDOWS'):
-                 print("      (Policy managed by Windows/AD)")
+                report_log.append("      (Policy managed by Windows/AD)")
             else:
-                 print("      (Policy not applicable)")
-            print("-" * 40)
+                report_log.append("      (Policy not applicable)")
+            report_log.append("-" * 40)
 
     except pyodbc.Error as ex:
-        print(f"[WARN] Error assessing logins: {ex}")
+        report_log.append(
+            format_check_result("Login Review", f"Error assessing logins: {ex}", "", "WARN")
+        )
     except Exception as e:
-         print(f"[WARN] Unexpected error assessing logins: {e}")
+        report_log.append(
+            format_check_result("Login Review", f"Unexpected error assessing logins: {e}", "", "WARN")
+        )
 
 # ---------- Check for Linked Servers ----------
-def check_linked_servers(cursor):
-    print_separator()
-    print("--- Checking Linked Servers ---")
+def check_linked_servers(cursor, report_log, utils):
+    """
+    Checks for linked servers.
+    Results are added to the report_log list.
+    """
+    format_check_result = utils.format_check_result
+    
+    report_log.append("\n" + "-"*60)
+    report_log.append("--- Checking Linked Servers ---")
+    
     try:
         cursor.execute("SELECT name, product, provider FROM sys.servers WHERE is_linked = 1 ORDER BY name;")
         rows = cursor.fetchall()
         if rows:
             server_list = [f"{row.name} (Product: {row.product or 'N/A'}, Provider: {row.provider or 'N/A'})" for row in rows]
-            print_check_result("Linked Servers Found", f"{len(rows)}: {'; '.join(server_list)}",
-                               "Review necessity, security context, and permissions for each.", "WARN")
+            report_log.append(
+                format_check_result("Linked Servers Found", f"{len(rows)}: {'; '.join(server_list)}",
+                                   "Review necessity, security context, and permissions for each.", "WARN")
+            )
         else:
-            print_check_result("Linked Servers", "None found.", "", "GOOD")
+            report_log.append(
+                format_check_result("Linked Servers", "None found.", "", "GOOD")
+            )
     except pyodbc.Error as ex:
-        print_check_result("Linked Servers", f"Error checking: {ex}", "Check permissions.", "WARN")
+        report_log.append(
+            format_check_result("Linked Servers", f"Error checking: {ex}", "Check permissions.", "WARN")
+        )
     except Exception as e:
-         print_check_result("Linked Servers", f"Unexpected error: {e}", "", "WARN")
+        report_log.append(
+            format_check_result("Linked Servers", f"Unexpected error: {e}", "", "WARN")
+        )
 
 # ---------- Check if CURRENT connection uses encryption ----------
-def check_current_connection_encryption(cursor):
-    print_separator()
-    print("--- Checking Connection Encryption (Current Session) ---")
+def check_current_connection_encryption(cursor, report_log, utils):
+    """
+    Checks if current connection uses encryption.
+    Results are added to the report_log list.
+    """
+    format_check_result = utils.format_check_result
+    
+    report_log.append("\n" + "-"*60)
+    report_log.append("--- Checking Connection Encryption (Current Session) ---")
+    
     try:
         # Get the session ID for the current connection
         cursor.execute("SELECT @@SPID;")
         spid_row = cursor.fetchone()
         if not spid_row:
-             print_check_result("Current Connection Encryption", "Could not get current SPID.", "", "INFO")
-             return
+            report_log.append(
+                format_check_result("Current Connection Encryption", "Could not get current SPID.", "", "INFO")
+            )
+            return
         spid = spid_row[0]
 
         # Check encryption status for this SPID
@@ -385,23 +545,40 @@ def check_current_connection_encryption(cursor):
         if row:
             encrypt_option = row[0] # Should be 'TRUE' or 'FALSE' as strings
             if encrypt_option == 'TRUE':
-                 print_check_result("Current Connection Encryption", "Encrypted (TLS/SSL)",
-                                   "Good. Note: This only confirms *this* connection is encrypted, not server's overall support/enforcement.", "GOOD")
+                report_log.append(
+                    format_check_result("Current Connection Encryption", "Encrypted (TLS/SSL)",
+                                       "Good. Note: This only confirms *this* connection is encrypted, not server's overall support/enforcement.", "GOOD")
+                )
             else: # Should be 'FALSE'
-                 print_check_result("Current Connection Encryption", "NOT Encrypted",
-                                   "CRITICAL: Configure server/client to force encryption (e.g., 'Force Protocol Encryption' server-side).", "CRIT")
+                report_log.append(
+                    format_check_result("Current Connection Encryption", "NOT Encrypted",
+                                       "CRITICAL: Configure server/client to force encryption (e.g., 'Force Protocol Encryption' server-side).", "CRIT")
+                )
         else:
-             print_check_result("Current Connection Encryption", f"Could not find connection info for SPID {spid}.", "", "INFO")
+            report_log.append(
+                format_check_result("Current Connection Encryption", f"Could not find connection info for SPID {spid}.", "", "INFO")
+            )
     except pyodbc.Error as ex:
         # Common cause: Missing VIEW SERVER STATE permission
-        print_check_result("Current Connection Encryption", f"Error checking: {ex}", "Check permissions (VIEW SERVER STATE required for dm_exec_connections).", "WARN")
+        report_log.append(
+            format_check_result("Current Connection Encryption", f"Error checking: {ex}", "Check permissions (VIEW SERVER STATE required for dm_exec_connections).", "WARN")
+        )
     except Exception as e:
-         print_check_result("Current Connection Encryption", f"Unexpected error: {e}", "", "WARN")
+        report_log.append(
+            format_check_result("Current Connection Encryption", f"Unexpected error: {e}", "", "WARN")
+        )
 
 # ---------- Check sysadmin role members ----------
-def check_sysadmin_members(cursor):
-    print_separator()
-    print("--- Checking Sysadmin Role Members ---")
+def check_sysadmin_members(cursor, report_log, utils):
+    """
+    Checks sysadmin role members.
+    Results are added to the report_log list.
+    """
+    format_check_result = utils.format_check_result
+    
+    report_log.append("\n" + "-"*60)
+    report_log.append("--- Checking Sysadmin Role Members ---")
+    
     sa_is_enabled = False # Default assumption
     try:
         # Quick check if 'sa' is enabled to refine recommendation
@@ -430,42 +607,57 @@ def check_sysadmin_members(cursor):
         # Refine count if 'sa' is the only member and it's disabled
         effective_admin_count = admin_count
         if admin_count == 1 and rows[0].LoginName == 'sa' and not sa_is_enabled:
-             effective_admin_count = 0
+            effective_admin_count = 0
 
         if effective_admin_count > 0:
-             # Add note if 'sa' is enabled and listed
-             sa_note = ""
-             if sa_is_enabled and 'sa (SQL_LOGIN)' in admin_list:
-                 sa_note = " ('sa' is enabled!)"
+            # Add note if 'sa' is enabled and listed
+            sa_note = ""
+            if sa_is_enabled and 'sa (SQL_LOGIN)' in admin_list:
+                sa_note = " ('sa' is enabled!)"
 
-             print_check_result("Sysadmin Role Members", f"{admin_count} found: {', '.join(admin_list)}{sa_note}",
-                               "Minimize sysadmin members. Grant specific permissions instead. Review each member.", "WARN")
+            report_log.append(
+                format_check_result("Sysadmin Role Members", f"{admin_count} found: {', '.join(admin_list)}{sa_note}",
+                                   "Minimize sysadmin members. Grant specific permissions instead. Review each member.", "WARN")
+            )
         else:
             # This covers case where only 'sa' is member and it's disabled
             status_msg = "None found (excluding 'sa' if disabled)." if admin_count > 0 else "None found."
-            print_check_result("Sysadmin Role Members", status_msg, "", "GOOD")
+            report_log.append(
+                format_check_result("Sysadmin Role Members", status_msg, "", "GOOD")
+            )
 
     except pyodbc.Error as ex:
-        print_check_result("Sysadmin Role Members", f"Error checking: {ex}", "Check permissions.", "WARN")
+        report_log.append(
+            format_check_result("Sysadmin Role Members", f"Error checking: {ex}", "Check permissions.", "WARN")
+        )
     except Exception as e:
-         print_check_result("Sysadmin Role Members", f"Unexpected error: {e}", "", "WARN")
+        report_log.append(
+            format_check_result("Sysadmin Role Members", f"Unexpected error: {e}", "", "WARN")
+        )
 
 # ---------- Check Server TLS/SSL Protocol Support (Windows Registry) ----------
-def check_server_tls_support():
+def check_server_tls_support(report_log, utils):
     """
     Checks enabled TLS/SSL protocols in Windows Registry (SChannel).
     Requires the script to run ON the SQL Server machine as Administrator.
+    Results are added to the report_log list.
     """
-    print_separator()
-    print("--- Checking Server TLS/SSL Support (Requires Local Admin on Server) ---")
+    format_check_result = utils.format_check_result
+    
+    report_log.append("\n" + "-"*60)
+    report_log.append("--- Checking Server TLS/SSL Support (Requires Local Admin on Server) ---")
 
     # Check if running on Windows and winreg was imported
     if platform.system() != "Windows":
-        print_check_result("Server TLS Check", "Skipped (Not running on Windows)", "", "INFO")
+        report_log.append(
+            format_check_result("Server TLS Check", "Skipped (Not running on Windows)", "", "INFO")
+        )
         return
     if not winreg:
-         print_check_result("Server TLS Check", "Skipped ('winreg' module not available)", "", "INFO")
-         return
+        report_log.append(
+            format_check_result("Server TLS Check", "Skipped ('winreg' module not available)", "", "INFO")
+        )
+        return
 
     base_path = r"SYSTEM\CurrentControlSet\Control\SecurityProviders\SCHANNEL\Protocols"
     protocols_to_check = {
@@ -556,33 +748,53 @@ def check_server_tls_support():
 
             results[protocol] = {"status": protocol_status, "level": level, "rec": recommendation}
 
-        # Print results
+        # Add results to report_log
         if not results:
-             print_check_result("Server TLS Check", "No protocols checked or error occurred.", "", "WARN")
+            report_log.append(
+                format_check_result("Server TLS Check", "No protocols checked or error occurred.", "", "WARN")
+            )
         else:
             for protocol, data in results.items():
-                print_check_result(f"{protocol} Server Support", data["status"], data["rec"], data["level"])
+                report_log.append(
+                    format_check_result(f"{protocol} Server Support", data["status"], data["rec"], data["level"])
+                )
 
     except Exception as e:
         # Catch potential errors opening the base SCHANNEL key etc.
-         print_check_result("Server TLS Check", f"Failed to perform check: {e}", "Ensure script runs as Admin on the server.", "WARN")
+        report_log.append(
+            format_check_result("Server TLS Check", f"Failed to perform check: {e}", "Ensure script runs as Admin on the server.", "WARN")
+        )
 
 # ---------- Reminder for Manual Network Checks ----------
-def check_network_exposure():
-    print_separator()
-    print("--- Network Exposure (Manual Check Required) ---")
-    print_check_result("TCP Port 1433 Exposure", "Requires external port scanning.",
-                       "Ensure firewall restricts access to 1433/TCP only from trusted IPs. Avoid direct internet exposure.", "INFO")
-    print_check_result("SQL Server Browser Service", "Requires checking Windows Services (services.msc) or PowerShell.",
-                       "Disable if not needed (e.g., all clients use static ports). Reduces information disclosure.", "INFO")
+def check_network_exposure(report_log, utils):
+    """
+    Checks network exposure.
+    Results are added to the report_log list.
+    """
+    format_check_result = utils.format_check_result
+    
+    report_log.append("\n" + "-"*60)
+    report_log.append("--- Network Exposure (Manual Check Required) ---")
+    
+    report_log.append(
+        format_check_result("TCP Port 1433 Exposure", "Requires external port scanning.",
+                           "Ensure firewall restricts access to 1433/TCP only from trusted IPs. Avoid direct internet exposure.", "INFO")
+    )
+    report_log.append(
+        format_check_result("SQL Server Browser Service", "Requires checking Windows Services (services.msc) or PowerShell.",
+                           "Disable if not needed (e.g., all clients use static ports). Reduces information disclosure.", "INFO")
+    )
 
 # ---------- Check Legacy Login Auditing Level ----------
-def check_login_auditing(cursor):
+def check_login_auditing(cursor, report_log, utils):
     """
     Checks CIS 5.3: Ensure 'Login Auditing' is set to 'failed logins'
+    Results are added to the report_log list.
     """
-    print_separator()
-    print("--- Checking Legacy Login Auditing (CIS 5.3) ---")
+    format_check_result = utils.format_check_result
+    
+    report_log.append("\n" + "-"*60)
+    report_log.append("--- Checking Legacy Login Auditing (CIS 5.3) ---")
     
     # This check is more complex as it requires reading a registry key
     # via an (undocumented but standard) stored procedure.
@@ -612,38 +824,57 @@ def check_login_auditing(cursor):
 
     except pyodbc.Error as ex:
         # This can fail if the user doesn't have permissions for xp_instance_regread
-        print_check_result("Login Auditing", f"Error checking: {ex}", 
-                           "Check permissions for 'xp_instance_regread'.", "WARN")
+        report_log.append(
+            format_check_result("Login Auditing", f"Error checking: {ex}", 
+                               "Check permissions for 'xp_instance_regread'.", "WARN")
+        )
         return
     except Exception as e:
-        print_check_result("Login Auditing", f"Unexpected error: {e}", "", "WARN")
+        report_log.append(
+            format_check_result("Login Auditing", f"Unexpected error: {e}", "", "WARN")
+        )
         return
 
     # Now, interpret the value we read
     if audit_level_value is not None:
         if audit_level_value == 2:
-            print_check_result("Login Auditing", "Failed logins only", "", "GOOD")
+            report_log.append(
+                format_check_result("Login Auditing", "Failed logins only", "", "GOOD")
+            )
         elif audit_level_value == 0:
-            print_check_result("Login Auditing", "None",
-                               "Set to 'Failed logins only' to detect brute-force attacks (CIS 5.3).", "CRIT")
+            report_log.append(
+                format_check_result("Login Auditing", "None",
+                                   "Set to 'Failed logins only' to detect brute-force attacks (CIS 5.3).", "CRIT")
+            )
         elif audit_level_value == 1:
-            print_check_result("Login Auditing", "Successful logins only",
-                               "Set to 'Failed logins only'. Successful logins should be captured via SQL Server Audit (CIS 5.4).", "WARN")
+            report_log.append(
+                format_check_result("Login Auditing", "Successful logins only",
+                                   "Set to 'Failed logins only'. Successful logins should be captured via SQL Server Audit (CIS 5.4).", "WARN")
+            )
         elif audit_level_value == 3:
-            print_check_result("Login Auditing", "Both failed and successful logins",
-                               "Set to 'Failed logins only'. Logging successful logins here creates noise in the error log (CIS 5.3).", "WARN")
+            report_log.append(
+                format_check_result("Login Auditing", "Both failed and successful logins",
+                                   "Set to 'Failed logins only'. Logging successful logins here creates noise in the error log (CIS 5.3).", "WARN")
+            )
         else:
-            print_check_result("Login Auditing", f"Unknown value ({audit_level_value})", "Investigate manually.", "INFO")
+            report_log.append(
+                format_check_result("Login Auditing", f"Unknown value ({audit_level_value})", "Investigate manually.", "INFO")
+            )
     else:
-        print_check_result("Login Auditing", "Could not determine status.", "Check query/permissions.", "INFO")
+        report_log.append(
+            format_check_result("Login Auditing", "Could not determine status.", "Check query/permissions.", "INFO")
+        )
 
 # ---------- Check SQL Server Audit Configuration ----------
-def check_sql_server_audit(cursor):
+def check_sql_server_audit(cursor, report_log, utils):
     """
     Checks CIS 5.4: Ensure 'SQL Server Audit' is set to capture key events
+    Results are added to the report_log list.
     """
-    print_separator()
-    print("--- Checking SQL Server Audit (CIS 5.4) ---")
+    format_check_result = utils.format_check_result
+    
+    report_log.append("\n" + "-"*60)
+    report_log.append("--- Checking SQL Server Audit (CIS 5.4) ---")
 
     # CIS 5.4 recommends auditing many groups.
     # For this tool, we will check for the most critical ones:
@@ -682,8 +913,10 @@ def check_sql_server_audit(cursor):
         rows = cursor.fetchall()
         
         if not rows:
-            print_check_result("SQL Server Audit", "NOT CONFIGURED",
-                               "Enable a Server Audit to capture successful logins, failed logins, and role changes (CIS 5.4).", "CRIT")
+            report_log.append(
+                format_check_result("SQL Server Audit", "NOT CONFIGURED",
+                                   "Enable a Server Audit to capture successful logins, failed logins, and role changes (CIS 5.4).", "CRIT")
+            )
             return
 
         for row in rows:
@@ -694,25 +927,37 @@ def check_sql_server_audit(cursor):
         missing_audits = [name for name, found in required_audits.items() if not found]
 
         if not missing_audits:
-            print_check_result("SQL Server Audit", "Configured (Found all critical groups)", "", "GOOD")
+            report_log.append(
+                format_check_result("SQL Server Audit", "Configured (Found all critical groups)", "", "GOOD")
+            )
         else:
-            print_check_result("SQL Server Audit", f"Partially Configured. Missing: {', '.join(missing_audits)}",
-                               "Ensure an enabled audit specification is capturing all critical groups (CIS 5.4).", "WARN")
+            report_log.append(
+                format_check_result("SQL Server Audit", f"Partially Configured. Missing: {', '.join(missing_audits)}",
+                                   "Ensure an enabled audit specification is capturing all critical groups (CIS 5.4).", "WARN")
+            )
 
     except pyodbc.Error as ex:
         # This can fail if the user doesn't have VIEW SERVER STATE or ALTER ANY SERVER AUDIT permission
-        print_check_result("SQL Server Audit", f"Error checking: {ex}", 
-                           "Check permissions (VIEW SERVER STATE, ALTER ANY SERVER AUDIT).", "WARN")
+        report_log.append(
+            format_check_result("SQL Server Audit", f"Error checking: {ex}", 
+                               "Check permissions (VIEW SERVER STATE, ALTER ANY SERVER AUDIT).", "WARN")
+        )
     except Exception as e:
-        print_check_result("SQL Server Audit", f"Unexpected error: {e}", "", "WARN")
+        report_log.append(
+            format_check_result("SQL Server Audit", f"Unexpected error: {e}", "", "WARN")
+        )
         
 # ---------- Check for Transparent Data Encryption (TDE) ----------
-def check_tde_encryption(cursor):
+def check_tde_encryption(cursor, report_log, utils):
     """
     Checks CIS 7.5: Ensure Databases are Encrypted with TDE
+    Results are added to the report_log list.
     """
-    print_separator()
-    print("--- Checking Database Encryption (TDE) (CIS 7.5) ---")
+    format_check_result = utils.format_check_result
+    
+    report_log.append("\n" + "-"*60)
+    report_log.append("--- Checking Database Encryption (TDE) (CIS 7.5) ---")
+    
     try:
         # 1 = Encrypted with TDE. 0 = Not Encrypted.
         # We check all user databases (database_id > 4)
@@ -724,7 +969,9 @@ def check_tde_encryption(cursor):
         """)
         rows = cursor.fetchall()
         if not rows:
-            print_check_result("Database Encryption (TDE)", "No user databases found.", "", "INFO")
+            report_log.append(
+                format_check_result("Database Encryption (TDE)", "No user databases found.", "", "INFO")
+            )
             return
 
         unencrypted_dbs = []
@@ -733,25 +980,37 @@ def check_tde_encryption(cursor):
                 unencrypted_dbs.append(row.name)
 
         if not unencrypted_dbs:
-            print_check_result("Database Encryption (TDE)", "All user databases are encrypted.", "", "GOOD")
+            report_log.append(
+                format_check_result("Database Encryption (TDE)", "All user databases are encrypted.", "", "GOOD")
+            )
         else:
-            print_check_result("Database Encryption (TDE)", f"NOT Encrypted: {', '.join(unencrypted_dbs)}",
-                               "Encrypt all user databases with TDE to meet BNM RMiT and PDPA data-at-rest requirements.", "CRIT")
+            report_log.append(
+                format_check_result("Database Encryption (TDE)", f"NOT Encrypted: {', '.join(unencrypted_dbs)}",
+                                   "Encrypt all user databases with TDE to meet BNM RMiT and PDPA data-at-rest requirements.", "CRIT")
+            )
 
     except pyodbc.Error as ex:
-        print_check_result("Database Encryption (TDE)", f"Error checking: {ex}", "Check permissions.", "WARN")
+        report_log.append(
+            format_check_result("Database Encryption (TDE)", f"Error checking: {ex}", "Check permissions.", "WARN")
+        )
     except Exception as e:
-        print_check_result("Database Encryption (TDE)", f"Unexpected error: {e}", "", "WARN")
+        report_log.append(
+            format_check_result("Database Encryption (TDE)", f"Unexpected error: {e}", "", "WARN")
+        )
 
 # ---------- Check for Backup Encryption ----------
-def check_backup_encryption(cursor):
+def check_backup_encryption(cursor, report_log, utils):
     """
     Checks CIS 7.3: Ensure Database Backups are Encrypted
     Note: This checks the *history* of recent backups. It also
     passes if TDE is on, as TDE backups are encrypted by default.
+    Results are added to the report_log list.
     """
-    print_separator()
-    print("--- Checking Database Backup Encryption (CIS 7.3) ---")
+    format_check_result = utils.format_check_result
+    
+    report_log.append("\n" + "-"*60)
+    report_log.append("--- Checking Database Backup Encryption (CIS 7.3) ---")
+    
     try:
         # This query checks the backup history (in msdb) and joins
         # with TDE status. Backups are considered "encrypted" if
@@ -776,15 +1035,23 @@ def check_backup_encryption(cursor):
         rows = cursor.fetchall()
         
         if not rows:
-            print_check_result("Backup Encryption", "All recent user database backups are encrypted (or TDE is enabled).", "", "GOOD")
+            report_log.append(
+                format_check_result("Backup Encryption", "All recent user database backups are encrypted (or TDE is enabled).", "", "GOOD")
+            )
         else:
             unencrypted_backups = list(set([row.database_name for row in rows]))
-            print_check_result("Backup Encryption", f"Unencrypted backups found for: {', '.join(unencrypted_backups)}",
-                               "Ensure all backups are made with the 'ENCRYPTION' option, or enable TDE on the database.", "CRIT")
+            report_log.append(
+                format_check_result("Backup Encryption", f"Unencrypted backups found for: {', '.join(unencrypted_backups)}",
+                                   "Ensure all backups are made with the 'ENCRYPTION' option, or enable TDE on the database.", "CRIT")
+            )
 
     except pyodbc.Error as ex:
         # This will fail if user cannot read msdb.dbo.backupset
-        print_check_result("Backup Encryption", f"Error checking: {ex}", 
-                           "Check permissions (must be able to read 'msdb.dbo.backupset').", "WARN")
+        report_log.append(
+            format_check_result("Backup Encryption", f"Error checking: {ex}", 
+                               "Check permissions (must be able to read 'msdb.dbo.backupset').", "WARN")
+        )
     except Exception as e:
-        print_check_result("Backup Encryption", f"Unexpected error: {e}", "", "WARN")
+        report_log.append(
+            format_check_result("Backup Encryption", f"Unexpected error: {e}", "", "WARN")
+        )

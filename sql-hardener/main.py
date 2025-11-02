@@ -4,35 +4,33 @@ import sys
 import configparser
 import importlib
 
-# Import the helper functions. We will pass them to the plug-in.
+# Import the helper functions and the new AI module
 import utils 
+import ai_analyzer
 
 def main():
     """
     Main "engine" for the compliance tool.
-    Reads config.ini to find and load the correct database plug-in.
+    Reads config.ini, loads the plug-in, runs checks,
+    calls GenAI, and prints the final report.
     """
     utils.write_to_file("--- Database Security & Compliance Auditor ---")
     
     # --- 1. Read Configuration ---
     config = configparser.ConfigParser()
+    api_key = None
+    technical_report_lines = []
+    
     try:
         config.read('config.ini')
-        if not config.sections():
-            utils.write_to_file("[CRITICAL] config.ini file not found or is empty.")
-            sys.exit(1)
-            
-        # Find out which DB to target
-        target_db_name = config.get('main', 'target_db', fallback=None)
-        if not target_db_name:
-            utils.write_to_file("[CRITICAL] 'target_db' not set in [main] section of config.ini")
-            sys.exit(1)
-
-        if target_db_name not in config:
-            utils.write_to_file(f"[CRITICAL] Config section [{target_db_name}] not found in config.ini")
-            sys.exit(1)
-            
+        target_db_name = config.get('main', 'target_db')
         target_config = config[target_db_name]
+        
+        # Get the AI API Key
+        api_key = config.get('genai', 'api_key', fallback=None)
+        if not api_key or "AIzaSyAoSScfz1pS6nm2Dki7bsRB-UVTj2vNfso" in api_key:
+            utils.write_to_file("\n[WARN] GenAI API key not found in config.ini. Skipping AI summary.\n")
+            api_key = None
 
     except Exception as e:
         utils.write_to_file(f"[CRITICAL] Error reading config.ini: {e}")
@@ -41,38 +39,37 @@ def main():
     # --- 2. Dynamically Load the Plug-in ---
     try:
         module_name_to_load = target_config.get('module_name')
-        if not module_name_to_load:
-            utils.write_to_file(f"[CRITICAL] 'module_name' not set in [{target_db_name}] section.")
-            sys.exit(1)
-            
         utils.write_to_file(f"Loading plug-in: {module_name_to_load}...")
-        
-        # This is the "magic" of a plug-in architecture
-        # It dynamically imports the module "checkers.check_mssql"
         checker_module = importlib.import_module(module_name_to_load)
         
-    except ImportError:
-        utils.write_to_file(f"[CRITICAL] Failed to import plug-in: {module_name_to_load}")
-        utils.write_to_file("Please ensure the file exists and you have all required drivers (e.g., pyodbc).")
-        sys.exit(1)
     except Exception as e:
         utils.write_to_file(f"[CRITICAL] Error loading plug-in: {e}")
         sys.exit(1)
 
     # --- 3. Run the Plug-in ---
     try:
-        # We call the 'run_all_checks' function inside the loaded module
-        # and pass it its specific config section and the utils.
-        checker_module.run_all_checks(target_config, utils)
+        # The plug-in runs and returns the full list of findings
+        technical_report_lines = checker_module.run_all_checks(target_config, utils)
         
-    except AttributeError:
-        # This triggers if the plug-in doesn't have a 'run_all_checks' function
-        utils.write_to_file(f"[CRITICAL] Plug-in {module_name_to_load} is invalid.")
-        utils.write_to_file("It does not have a 'run_all_checks(config, utils)' function.")
-        sys.exit(1)
     except Exception as e:
         utils.write_to_file(f"[CRITICAL] An error occurred while running checks: {e}")
         sys.exit(1)
+
+    # --- 4. Print the Full Technical Report ---
+    utils.write_to_file("\n### Detailed Technical Report ###")
+    for line in technical_report_lines:
+        utils.write_to_file(line)
+
+    # --- 5. Generate AI Summary (if key exists) ---
+    if api_key and technical_report_lines:
+        utils.print_separator("=", 60)
+        utils.write_to_file("### AI-Powered Executive Summary ###")
+        utils.write_to_file("... (Generating summary, please wait) ...")
+        
+        summary = ai_analyzer.get_executive_summary(technical_report_lines, api_key, utils)
+        
+        utils.write_to_file("\n" + summary)
+        utils.print_separator("=", 60)
 
     utils.write_to_file("\n--- Audit Complete ---")
 

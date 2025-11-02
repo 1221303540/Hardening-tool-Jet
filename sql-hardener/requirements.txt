@@ -1,2 +1,3 @@
 pyodbc
 pymongo
+google-generativeai
