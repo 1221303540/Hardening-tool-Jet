@@ -39,7 +39,7 @@ This tool is separated into a "core engine" and "plug-ins". This design makes it
 You must have Python 3.x installed.
 
 The required Python libraries are listed in `requirements.txt`:
-pyodbc
+pyodbc,
 pymongo
 
 ## How to Use
@@ -104,5 +104,5 @@ The `main.py` engine will automatically find and run your new plug-in if you set
 | 5.3 | 'Login Auditing' is 'failed logins' | `check_login_auditing` | Security Principle (Sec. 9): A "practical step" to detect "unauthorised... access" attempts. | S 10.61 (b): "User activities... are logged for audit and investigations". This check ensures brute-force attacks are logged. | CNII Duties: A mandatory control for incident detection and response. |
 | 5.4 | 'SQL Server Audit' is configured | `check_sql_server_audit` | Security Principle (Sec. 9): Creates a "practical step" for a robust audit trail to investigate any "unauthorised... disclosure." | S 10.61 (b): This is the modern implementation of this rule, ensuring "user activities... are logged for audit" in a dedicated, secure log. | CNII Duties: Provides the primary, modern audit trail required for forensic investigation after a cyber incident. |
 | **Section 7** | **Encryption** | | | | |
-| NEW7.3 | Database Backups are Encrypted | `check_backup_encryption` | Security Principle (Sec. 9): A critical "practical step to protect... from any loss... or unauthorised... disclosure" of backup files. | Cryptography: This directly supports RMiT's requirement for strong cryptographic controls to protect data, especially when backups are moved off-site. | CNII Duties: A mandatory measure to ensure data confidentiality, even if the backup media is stolen. |
-| NEW7.5 | Databases are Encrypted (TDE) | `check_tde_encryption` | Security Principle (Sec. 9): The strongest "practical step" to protect data from "unauthorised access" if the physical server or drives are stolen. | Cryptography / Data-at-Rest: This is the primary control for RMiT's requirement to encrypt sensitive data-at-rest. | CNII Duties: The core technical control for ensuring the confidentiality of data on a critical system. |
+| 7.3 | Database Backups are Encrypted | `check_backup_encryption` | Security Principle (Sec. 9): A critical "practical step to protect... from any loss... or unauthorised... disclosure" of backup files. | Cryptography: This directly supports RMiT's requirement for strong cryptographic controls to protect data, especially when backups are moved off-site. | CNII Duties: A mandatory measure to ensure data confidentiality, even if the backup media is stolen. |
+| 7.5 | Databases are Encrypted (TDE) | `check_tde_encryption` | Security Principle (Sec. 9): The strongest "practical step" to protect data from "unauthorised access" if the physical server or drives are stolen. | Cryptography / Data-at-Rest: This is the primary control for RMiT's requirement to encrypt sensitive data-at-rest. | CNII Duties: The core technical control for ensuring the confidentiality of data on a critical system. |
