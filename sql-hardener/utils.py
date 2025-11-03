@@ -14,9 +14,7 @@ def print_separator(char='-', length=60):
 # ... (write_to_file and print_separator stay the same) ...
 
 def format_check_result(title, status, recommendation="", level="INFO"):
-    """
-    Formats and returns the result of a check as a string.
-    """
+    #Formats and returns the result of a check as a string.
     level_map = {
         "INFO": "[INFO]",
         "GOOD": "[GOOD]",

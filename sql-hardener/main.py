@@ -1,19 +1,14 @@
 #!/usr/bin/env python3
 
 import sys
+import os
 import configparser
 import importlib
-
-# Import the helper functions and the new AI module
 import utils 
 import ai_analyzer
 
 def main():
-    """
-    Main "engine" for the compliance tool.
-    Reads config.ini, loads the plug-in, runs checks,
-    calls GenAI, and prints the final report.
-    """
+    
     utils.write_to_file("--- Database Security & Compliance Auditor ---")
     
     # --- 1. Read Configuration ---
@@ -26,9 +21,8 @@ def main():
         target_db_name = config.get('main', 'target_db')
         target_config = config[target_db_name]
         
-        # Get the AI API Key
         api_key = config.get('genai', 'api_key', fallback=None)
-        if not api_key or "AIzaSyAoSScfz1pS6nm2Dki7bsRB-UVTj2vNfso" in api_key:
+        if not api_key or "YOUR_KEY_HERE" in api_key:
             utils.write_to_file("\n[WARN] GenAI API key not found in config.ini. Skipping AI summary.\n")
             api_key = None
 
@@ -48,28 +42,67 @@ def main():
 
     # --- 3. Run the Plug-in ---
     try:
-        # The plug-in runs and returns the full list of findings
         technical_report_lines = checker_module.run_all_checks(target_config, utils)
         
     except Exception as e:
         utils.write_to_file(f"[CRITICAL] An error occurred while running checks: {e}")
         sys.exit(1)
 
-    # --- 4. Print the Full Technical Report ---
-    utils.write_to_file("\n### Detailed Technical Report ###")
-    for line in technical_report_lines:
-        utils.write_to_file(line)
+    # --- 4. NEW: Calculate Risk Score & Totals ---
+    total_findings = 0
+    total_crit = 0
+    total_warn = 0
+    risk_score = 0
+    
+    # Define your scoring model
+    SCORE_CRITICAL = 10
+    SCORE_WARNING = 3
 
-    # --- 5. Generate AI Summary (if key exists) ---
+    if technical_report_lines:
+        for line in technical_report_lines:
+            if line.strip().startswith("[CRIT]"):
+                total_crit += 1
+                risk_score += SCORE_CRITICAL
+            elif line.strip().startswith("[WARN]"):
+                total_warn += 1
+                risk_score += SCORE_WARNING
+        
+        total_findings = total_crit + total_warn
+
+    # --- 5. Print the Quantitative Report ---
+    # (This entire block is new)
+    utils.print_separator("=", 60)
+    utils.write_to_file("###  Quantitative Risk Analysis ###")
+    utils.write_to_file(f"Total Risk Score: {risk_score}  (CRIT={SCORE_CRITICAL}pts, WARN={SCORE_WARNING}pts)")
+    utils.write_to_file(f"Total Findings to Settle: {total_findings} (Critical: {total_crit}, Warning: {total_warn})")
+    utils.print_separator("=", 60)
+    
+    # --- 6. Generate AI Summary (if key exists) ---
     if api_key and technical_report_lines:
-        utils.print_separator("=", 60)
-        utils.write_to_file("### AI-Powered Executive Summary ###")
+        utils.write_to_file("\n###  AI-Powered Executive Summary ###") # Updated title
         utils.write_to_file("... (Generating summary, please wait) ...")
         
-        summary = ai_analyzer.get_executive_summary(technical_report_lines, api_key, utils)
+        # --- MODIFIED: Pass new scores to the AI ---
+        summary = ai_analyzer.get_executive_summary(
+            technical_report_lines,
+            risk_score,
+            total_findings,
+            total_crit,
+            total_warn,
+            api_key, 
+            utils
+        )
         
         utils.write_to_file("\n" + summary)
         utils.print_separator("=", 60)
+
+    # --- 7. Print the Full Technical Report ---
+    utils.write_to_file("\n### Detailed Technical Report ###") # Updated title
+    if not technical_report_lines:
+        utils.write_to_file("All checks passed. No findings to report.")
+        
+    for line in technical_report_lines:
+        utils.write_to_file(line)
 
     utils.write_to_file("\n--- Audit Complete ---")
 

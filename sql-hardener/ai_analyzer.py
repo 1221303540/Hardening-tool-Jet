@@ -1,6 +1,6 @@
 import google.generativeai as genai
 
-def get_executive_summary(findings_list, api_key, utils):
+def get_executive_summary(findings_list, risk_score, total_findings, total_crit, total_warn, api_key, utils):
     """
     Uses the Gemini API to generate a high-level summary of the findings.
     """
@@ -12,6 +12,11 @@ def get_executive_summary(findings_list, api_key, utils):
         return "All checks passed. No high-risk issues found."
 
     try:
+        # Validate API key
+        if not api_key or not api_key.strip():
+            write_to_file("\n[AI_ERROR] API key is empty or invalid.")
+            return "AI summary could not be generated. Invalid API key."
+        
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel('models/gemini-2.5-flash')
 
@@ -19,14 +24,25 @@ def get_executive_summary(findings_list, api_key, utils):
         findings_text = "\n".join(critical_findings)
 
         prompt = f"""
-        You are a senior cybersecurity auditor writing an executive summary for a non-technical manager.
-        Below is a list of technical security findings from an automated database scan.
+        Act as a professional cybersecurity consultant reporting to a CISO.
+        The following is a list of raw technical findings from an automated database scan.
         
-        Do the following:
-        1.  Start with a 1-sentence "bottom line" of the server's security (e.g., "Critical", "Needs Attention", etc.).
-        2.  In 2-3 sentences, describe the *most urgent combined risks* in simple terms.
-        3.  Do not list every finding. Summarize the main themes.
+        Here is the quantitative analysis:
+        - Total Risk Score: {risk_score} (10 pts per Critical, 3 per Warning)
+        - Total Findings: {total_findings}
+        - Critical Findings: {total_crit}
+        - Warning Findings: {total_warn}
+
+        Here is the list of raw technical findings:
+         {findings_text}\
+
+        Your task is to generate a 3-part executive summary in plain English. Avoid all technical jargon.
+
         
+        1.  **Overall Risk Assessment:** Start with a single, clear classification: CRITICAL, HIGH, MEDIUM, or LOW. Address each findings in a tone as short as possible.
+        2.  **Key Risk Narrative:** Do not list all findings. Instead, identify the single most urgent attack vector. Explain *how* 2-3 of the findings *combine* to create a specific business risk (e.g., "Attackers can steal customer data because...") in short and concise terms.
+        3.  **Priority Action Plan:** List the urgent remediation steps from most urgent to non-urgent in a numbered list. Be short andspecific.
+
         Technical Findings:
         {findings_text}
         """
