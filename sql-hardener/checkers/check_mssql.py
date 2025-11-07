@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
-
 import pyodbc
 import getpass
 import platform
+from typing import Dict, List, Any, Tuple, Optional
 from utils import write_to_file, format_check_result
+from constants import (
+    SEPARATOR_LENGTH, SECTION_SEPARATOR_CHAR, SCORE_CRITICAL, SCORE_WARNING,
+    AUDIT_LEVEL_NONE, AUDIT_LEVEL_SUCCESS, AUDIT_LEVEL_FAILED, AUDIT_LEVEL_BOTH,
+    AUTH_MODE_MIXED, AUTH_MODE_WINDOWS_ONLY
+)
+from checkers.remediation_scripts import REMEDIATION_SQL
 
 if platform.system() == "Windows": # Import winreg only if on Windows
     try:
@@ -13,9 +19,158 @@ if platform.system() == "Windows": # Import winreg only if on Windows
 else:
     winreg = None
 
-def run_all_checks(config, utils):
+# HELPER FUNCTIONS FOR REMEDIATION
+def _apply_sql_batch(cursor: Any, conn: Any, commands: List[str], utils: Any) -> None:
+    for sql_command in commands:
+        cursor.execute(sql_command)
+    conn.commit()
+    utils.write_to_file("    Fix applied successfully.")
+
+def remediate_by_key(cursor: Any, conn: Any, key: str, utils: Any) -> bool:
+    commands = REMEDIATION_SQL.get(key)
+    if not commands:
+        utils.write_to_file("   No automated remediation available for this finding.")
+        return False
+    try:
+        _apply_sql_batch(cursor, conn, commands, utils)
+        return True
+    except Exception as e:
+        utils.write_to_file(f"    ERROR applying fix: {e}")
+        return False
+
+def _extract_findings(report_log: List[str]) -> List[str]:
+    return [line for line in report_log if line.strip().startswith(("[CRIT]", "[WARN]"))]
+
+def run_interactive_remediation(config: Dict[str, Any], utils: Any) -> List[str]:
+    write_to_file = utils.write_to_file
+    print_separator = getattr(utils, 'print_separator', lambda c, n: None)
+
+    write_to_file("[MODE] Running in INTERACTIVE REMEDIATION mode.")
+
+    try:
+        server = config.get('server', 'localhost')
+        database = config.get('database', 'master')
+        username = config.get('username', 'sa')
+        password = config.get('password', None)
+        if not password:
+            password = getpass.getpass(f"Enter password for MS-SQL user '{username}': ")
+
+        conn_string = (
+            f"DRIVER={config.get('driver')};"
+            f"SERVER={server};"
+            f"DATABASE={database};"
+            f"UID={username};"
+            f"PWD={password};"
+            "TrustServerCertificate=yes;"
+            "Encrypt=yes;"
+        )
+
+        write_to_file(f"\nConnecting to MS-SQL Server {server}...")
+        conn = pyodbc.connect(conn_string)
+        cursor = conn.cursor()
+        write_to_file("Connected successfully.\n")
+
+        write_to_file("Scanning...")
+        report_log = run_all_checks({**config, 'password': password}, utils)
+        checks_run = 12 # update if checks added/removed
+        write_to_file(f"Scan complete. {checks_run} checks run.")
+
+        findings = _extract_findings(report_log)
+        # Deduplicate exact lines to avoid repeated prompts
+        seen = set()
+        unique_findings = []
+        for f in findings:
+            if f not in seen:
+                seen.add(f)
+                unique_findings.append(f)
+
+        write_to_file(f"\nFound {len(unique_findings)} findings to remediate.")
+        print_separator(SECTION_SEPARATOR_CHAR, SEPARATOR_LENGTH)
+        write_to_file("### Interactive Remediation ###")
+        print_separator(SECTION_SEPARATOR_CHAR, SEPARATOR_LENGTH)
+
+        for finding in unique_findings:
+            write_to_file("\n" + finding)
+
+            # High-risk notice for auth mode change
+            if "Server Authentication" in finding and "Mixed Mode" in finding:
+                write_to_file("\n    *** HIGH RISK ACTION WARNING ***")
+                write_to_file("    This fix will change the server to Windows-Only Authentication.")
+                write_to_file("    All SQL logins (like 'sa') will STOP working.")
+                write_to_file("    This action requires a server RESTART to apply.\n")
+
+            choice = input("    Do you want to apply the fix for this finding? (y/n): ").lower()
+            if choice not in ['y', 'yes']:
+                write_to_file("    Skipping this finding.")
+                write_to_file("------------------------------------------------------------")
+                continue
+
+            applied = False
+            if "xp_cmdshell Status: ENABLED" in finding:
+                write_to_file("    Applying fix for 'xp_cmdshell'...")
+                applied = remediate_by_key(cursor, conn, "DISABLE_XP_CMDSHELL", utils)
+            elif "CLR Integration" in finding and "ENABLED" in finding:
+                write_to_file("    Applying fix for 'CLR Integration'...")
+                applied = remediate_by_key(cursor, conn, "DISABLE_CLR", utils)
+            elif "Ad Hoc Distributed Queries" in finding and "ENABLED" in finding:
+                write_to_file("    Applying fix for 'Ad Hoc Distributed Queries'...")
+                applied = remediate_by_key(cursor, conn, "DISABLE_AD_HOC_DISTRIBUTED", utils)
+            elif "Database Mail XPs" in finding and "ENABLED" in finding:
+                write_to_file("    Applying fix for 'Database Mail XPs'...")
+                applied = remediate_by_key(cursor, conn, "DISABLE_DATABASE_MAIL_XPS", utils)
+            elif "Ole Automation Procedures" in finding and "ENABLED" in finding:
+                write_to_file("    Applying fix for 'Ole Automation Procedures'...")
+                applied = remediate_by_key(cursor, conn, "DISABLE_OLE_AUTOMATION", utils)
+            elif "'sa' Account Status" in finding and "ENABLED" in finding:
+                write_to_file("    Applying fix for 'sa' account (disable)...")
+                applied = remediate_by_key(cursor, conn, "DISABLE_SA_ACCOUNT", utils)
+            elif "Server Authentication" in finding and "Mixed Mode" in finding:
+                write_to_file("    Applying fix for 'Server Authentication' (set Windows Auth Mode)...")
+                write_to_file("    ⚠️ This change requires a SQL Server service restart to take effect.")
+                applied = remediate_by_key(cursor, conn, "ENABLE_WINDOWS_AUTH_MODE", utils)
+            elif "Login Auditing" in finding and ("None" in finding or "Successful logins only" in finding or "Both failed and successful logins" in finding):
+                write_to_file("    Applying fix for 'Login Auditing' (Failed logins only)...")
+                write_to_file("    ⚠️ This change may require a SQL Server service restart to take effect.")
+                applied = remediate_by_key(cursor, conn, "SET_AUDITLEVEL_FAILED_ONLY", utils)
+            else:
+                write_to_file("    No automated remediation available for this finding.")
+
+            if applied:
+                write_to_file("    Fix applied.")
+            write_to_file("------------------------------------------------------------")
+
+        write_to_file("\nInteractive remediation complete.")
+
+        # Re-run scan to get final report
+        write_to_file("\nRe-running scan to get final report...")
+        final_log = run_all_checks({**config, 'password': password}, utils)
+        
+        write_to_file("\nInteractive remediation session complete.")
+        write_to_file("Final results will be displayed below.")
+        
+        # Cleanup
+        cursor.close(); conn.close()
+        
+        # Return the final scan results to main.py for consistent reporting
+        return final_log
+
+    except pyodbc.Error as ex:
+        write_to_file(f"[CRIT] MS-SQL connection error: {ex}")
+        return []
+    except Exception as e:
+        write_to_file(f"[CRIT] Unexpected error in remediation: {e}")
+        return []
+
+def run_all_checks(config: Dict[str, Any], utils: Any) -> List[str]:
     """
     Connects to MS-SQL and runs all MS-SQL specific checks.
+    
+    Args:
+        config (Dict[str, Any]): Configuration dictionary with connection details.
+        utils (Any): Utils module reference.
+    
+    Returns:
+        List[str]: Report log with all check results.
     """
     write_to_file = utils.write_to_file # Get helper from main
     report_log = []
@@ -74,14 +229,57 @@ def run_all_checks(config, utils):
         conn.close()
 
     except pyodbc.Error as ex:
-        write_to_file(f"[CRITICAL] MS-SQL connection error: {ex}")
+        write_to_file(f"[CRIT] MS-SQL connection error: {ex}")
     except Exception as e:
-        write_to_file(f"[CRITICAL] Unexpected error in MS-SQL checker: {e}")
+        write_to_file(f"[CRIT] Unexpected error in MS-SQL checker: {e}")
 
     return report_log
 
-# ---------- Check if xp_cmdshell is enabled ----------
-def check_xp_cmdshell(cursor, report_log, utils):
+def run_mssql(config: Dict[str, Any], utils: Any) -> List[str]:
+    """
+    Entry wrapper: if config['interactive_remediation'] is True, run remediation mode;
+    otherwise run the standard checks.
+    
+    Args:
+        config (Dict[str, Any]): Configuration dictionary.
+        utils (Any): Utils module reference.
+    
+    Returns:
+        List[str]: Report log (empty list in remediation mode).
+    """
+    if 'interactive_remediation' not in config:
+        # Fallback prompt if caller did not choose mode explicitly
+        utils.write_to_file("Select mode:\n  1) Scan only\n  2) Interactive remediation")
+        choice = input("Enter choice [1/2] (default 1): ").strip()
+        config['interactive_remediation'] = (choice == '2')
+
+    if config.get('interactive_remediation'):
+        return run_interactive_remediation(config, utils)
+    return run_all_checks(config, utils)
+
+def prompt_mode_and_run(config: Dict[str, Any], utils: Any) -> List[str]:
+    """
+    Prompt the user to choose mode before running (scan vs interactive remediation).
+    If config['interactive_remediation'] is already set, it will be respected.
+    
+    Args:
+        config (Dict[str, Any]): Configuration dictionary.
+        utils (Any): Utils module reference.
+    
+    Returns:
+        List[str]: Report log from run_mssql().
+    """
+    if 'interactive_remediation' not in config:
+        utils.write_to_file("Select mode:\n  1) Scan only\n  2) Interactive remediation")
+        choice = input("Enter choice [1/2] (default 1): ").strip()
+        if choice == '2':
+            config['interactive_remediation'] = True
+        else:
+            config['interactive_remediation'] = False
+        return run_mssql(config, utils)
+
+# SECURITY CHECK FUNCTIONS - SURFACE AREA CONFIGURATION
+def check_xp_cmdshell(cursor: Any, report_log: List[str], utils: Any) -> None:
     """
     Checks if xp_cmdshell is enabled.
     Results are added to the report_log list.
@@ -89,7 +287,7 @@ def check_xp_cmdshell(cursor, report_log, utils):
     # Get the formatting function
     format_check_result = utils.format_check_result
     
-    report_log.append("\n" + "-"*60)
+    report_log.append("\n" + "-" * SEPARATOR_LENGTH)
     report_log.append("--- Checking xp_cmdshell ---")
     
     try:
@@ -123,15 +321,14 @@ def check_xp_cmdshell(cursor, report_log, utils):
             format_check_result("xp_cmdshell Status", f"Unexpected error: {e}", "", "WARN")
         )
 
-# ---------- Check if CLR is enabled ----------
-def check_clr_enabled(cursor, report_log, utils):
+def check_clr_enabled(cursor: Any, report_log: List[str], utils: Any) -> None:
     """
     Checks if CLR is enabled.
     Results are added to the report_log list.
     """
     format_check_result = utils.format_check_result
     
-    report_log.append("\n" + "-"*60)
+    report_log.append("\n" + "-" * SEPARATOR_LENGTH)
     report_log.append("--- Checking CLR Integration ---")
     
     try:
@@ -165,15 +362,14 @@ def check_clr_enabled(cursor, report_log, utils):
             format_check_result("CLR Integration", f"Unexpected error: {e}", "", "WARN")
         )
 
-# ---------- Check for Ad Hoc Distributed Queries ----------
-def check_ad_hoc_queries(cursor, report_log, utils):
+def check_ad_hoc_queries(cursor: Any, report_log: List[str], utils: Any) -> None:
     """
     Checks CIS 2.1: Ensure 'Ad Hoc Distributed Queries' is set to '0'
     Results are added to the report_log list.
     """
     format_check_result = utils.format_check_result
     
-    report_log.append("\n" + "-"*60)
+    report_log.append("\n" + "-" * SEPARATOR_LENGTH)
     report_log.append("--- Checking Ad Hoc Distributed Queries (CIS 2.1) ---")
     
     try:
@@ -208,15 +404,14 @@ def check_ad_hoc_queries(cursor, report_log, utils):
             format_check_result("Ad Hoc Distributed Queries", f"Unexpected error: {e}", "", "WARN")
         )
 
-# ---------- Check if Database Mail XPs is enabled ----------
-def check_database_mail(cursor, report_log, utils):
+def check_database_mail(cursor: Any, report_log: List[str], utils: Any) -> None:
     """
     Checks CIS 2.4: Ensure 'Database Mail XPs' is set to '0'
     Results are added to the report_log list.
     """
     format_check_result = utils.format_check_result
     
-    report_log.append("\n" + "-"*60)
+    report_log.append("\n" + "-" * SEPARATOR_LENGTH)
     report_log.append("--- Checking Database Mail XPs (CIS 2.4) ---")
     
     try:
@@ -251,15 +446,14 @@ def check_database_mail(cursor, report_log, utils):
             format_check_result("Database Mail XPs", f"Unexpected error: {e}", "", "WARN")
         )
 
-# ---------- Check if Ole Automation Procedures is enabled ----------
-def check_ole_automation(cursor, report_log, utils):
+def check_ole_automation(cursor: Any, report_log: List[str], utils: Any) -> None:
     """
     Checks CIS 2.5: Ensure 'Ole Automation Procedures' is set to '0'
     Results are added to the report_log list.
     """
     format_check_result = utils.format_check_result
     
-    report_log.append("\n" + "-"*60)
+    report_log.append("\n" + "-" * SEPARATOR_LENGTH)
     report_log.append("--- Checking Ole Automation Procedures (CIS 2.5) ---")
     
     try:
@@ -294,15 +488,15 @@ def check_ole_automation(cursor, report_log, utils):
             format_check_result("Ole Automation Procedures", f"Unexpected error: {e}", "", "WARN")
         )
 
-# ---------- Check sa login status ----------
-def check_sa_login(cursor, report_log, utils):
+# SECURITY CHECK FUNCTIONS - AUTHENTICATION & ACCESS CONTROL
+def check_sa_login(cursor: Any, report_log: List[str], utils: Any) -> None:
     """
     Checks sa login status.
     Results are added to the report_log list.
     """
     format_check_result = utils.format_check_result
     
-    report_log.append("\n" + "-"*60)
+    report_log.append("\n" + "-" * SEPARATOR_LENGTH)
     report_log.append("--- Checking 'sa' Login Status ---")
     
     try:
@@ -345,7 +539,7 @@ def check_sa_renamed(cursor, report_log, utils):
     """
     format_check_result = utils.format_check_result
     
-    report_log.append("\n" + "-"*60)
+    report_log.append("\n" + "-" * SEPARATOR_LENGTH)
     report_log.append("--- Checking 'sa' Login Name (CIS 2.14) ---")
     
     try:
@@ -390,7 +584,7 @@ def check_authentication_mode(cursor, report_log, utils):
     """
     format_check_result = utils.format_check_result
     
-    report_log.append("\n" + "-"*60)
+    report_log.append("\n" + "-" * SEPARATOR_LENGTH)
     report_log.append("--- Checking Server Authentication Mode (CIS 3.1) ---")
     
     try:
@@ -436,7 +630,7 @@ def review_sql_logins(cursor, report_log, utils):
     """
     format_check_result = utils.format_check_result
     
-    report_log.append("\n" + "-"*60)
+    report_log.append("\n" + "-" * SEPARATOR_LENGTH)
     report_log.append("--- Reviewing Logins ---")
     
     try:
@@ -450,7 +644,7 @@ def review_sql_logins(cursor, report_log, utils):
         """)
         logins = cursor.fetchall()
         report_log.append(f"[INFO] Found {len(logins)} total logins.")
-        report_log.append("-" * 40)
+        report_log.append("-" * SEPARATOR_LENGTH)
         if not logins:
             report_log.append("   No logins found (or insufficient permissions).")
             return
@@ -473,7 +667,7 @@ def review_sql_logins(cursor, report_log, utils):
                 report_log.append("      (Policy managed by Windows/AD)")
             else:
                 report_log.append("      (Policy not applicable)")
-            report_log.append("-" * 40)
+            report_log.append("-" * SEPARATOR_LENGTH)
 
     except pyodbc.Error as ex:
         report_log.append(
@@ -492,7 +686,7 @@ def check_linked_servers(cursor, report_log, utils):
     """
     format_check_result = utils.format_check_result
     
-    report_log.append("\n" + "-"*60)
+    report_log.append("\n" + "-" * SEPARATOR_LENGTH)
     report_log.append("--- Checking Linked Servers ---")
     
     try:
@@ -525,7 +719,7 @@ def check_current_connection_encryption(cursor, report_log, utils):
     """
     format_check_result = utils.format_check_result
     
-    report_log.append("\n" + "-"*60)
+    report_log.append("\n" + "-" * SEPARATOR_LENGTH)
     report_log.append("--- Checking Connection Encryption (Current Session) ---")
     
     try:
@@ -576,7 +770,7 @@ def check_sysadmin_members(cursor, report_log, utils):
     """
     format_check_result = utils.format_check_result
     
-    report_log.append("\n" + "-"*60)
+    report_log.append("\n" + "-" * SEPARATOR_LENGTH)
     report_log.append("--- Checking Sysadmin Role Members ---")
     
     sa_is_enabled = False # Default assumption
@@ -644,7 +838,7 @@ def check_server_tls_support(report_log, utils):
     """
     format_check_result = utils.format_check_result
     
-    report_log.append("\n" + "-"*60)
+    report_log.append("\n" + "-" * SEPARATOR_LENGTH)
     report_log.append("--- Checking Server TLS/SSL Support (Requires Local Admin on Server) ---")
 
     # Check if running on Windows and winreg was imported
@@ -773,7 +967,7 @@ def check_network_exposure(report_log, utils):
     """
     format_check_result = utils.format_check_result
     
-    report_log.append("\n" + "-"*60)
+    report_log.append("\n" + "-" * SEPARATOR_LENGTH)
     report_log.append("--- Network Exposure (Manual Check Required) ---")
     
     report_log.append(
@@ -793,7 +987,7 @@ def check_login_auditing(cursor, report_log, utils):
     """
     format_check_result = utils.format_check_result
     
-    report_log.append("\n" + "-"*60)
+    report_log.append("\n" + "-" * SEPARATOR_LENGTH)
     report_log.append("--- Checking Legacy Login Auditing (CIS 5.3) ---")
     
     # This check is more complex as it requires reading a registry key
@@ -873,7 +1067,7 @@ def check_sql_server_audit(cursor, report_log, utils):
     """
     format_check_result = utils.format_check_result
     
-    report_log.append("\n" + "-"*60)
+    report_log.append("\n" + "-" * SEPARATOR_LENGTH)
     report_log.append("--- Checking SQL Server Audit (CIS 5.4) ---")
 
     # CIS 5.4 recommends auditing many groups.
@@ -955,7 +1149,7 @@ def check_tde_encryption(cursor, report_log, utils):
     """
     format_check_result = utils.format_check_result
     
-    report_log.append("\n" + "-"*60)
+    report_log.append("\n" + "-" * SEPARATOR_LENGTH)
     report_log.append("--- Checking Database Encryption (TDE) (CIS 7.5) ---")
     
     try:
@@ -1008,7 +1202,7 @@ def check_backup_encryption(cursor, report_log, utils):
     """
     format_check_result = utils.format_check_result
     
-    report_log.append("\n" + "-"*60)
+    report_log.append("\n" + "-" * SEPARATOR_LENGTH)
     report_log.append("--- Checking Database Backup Encryption (CIS 7.3) ---")
     
     try:
