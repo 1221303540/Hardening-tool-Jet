@@ -1,16 +1,12 @@
 #!/usr/bin/env python3
-
 import getpass
+from typing import Dict, List, Any
 from pymongo import MongoClient, errors
+from constants import MONGODB_TIMEOUT_MS, SEPARATOR_LENGTH
 
-# -----------------------------------------------------------------
 # This is the main "entry point" for this plug-in.
 # The main.py engine will call this function.
-# -----------------------------------------------------------------
-def run_all_checks(config, utils):
-    """
-    Connects to MongoDB and runs all MongoDB-specific security checks.
-    """
+def run_all_checks(config: Dict[str, str], utils: Any) -> List[str]:
     # Get the helper functions from the 'utils' module passed by main.py
     write_to_file = utils.write_to_file
     report_log = []
@@ -30,7 +26,7 @@ def run_all_checks(config, utils):
             connection_string,
             username=username,
             password=password,
-            serverSelectionTimeoutMS=5000  # 5-second timeout
+            serverSelectionTimeoutMS=MONGODB_TIMEOUT_MS
         )
         
         # Ping the server to verify connection and auth
@@ -49,19 +45,17 @@ def run_all_checks(config, utils):
         client.close()
 
     except errors.ConnectionFailure as ex:
-        write_to_file(f"[CRITICAL] MongoDB connection error: {ex}")
+        write_to_file(f"[CRIT] MongoDB connection error: {ex}")
     except errors.OperationFailure as ex:
-        write_to_file(f"[CRITICAL] MongoDB authentication error: {ex}")
+        write_to_file(f"[CRIT] MongoDB authentication error: {ex}")
     except Exception as e:
-        write_to_file(f"[CRITICAL] Unexpected error in MongoDB checker: {e}")
+        write_to_file(f"[CRIT] Unexpected error in MongoDB checker: {e}")
 
     return report_log
 
-# -----------------------------------------------------------------
-# All MongoDB-specific check functions are below
-# -----------------------------------------------------------------
 
-def check_auth_enabled(client, report_log, utils):
+# All MongoDB-specific check functions are below
+def check_auth_enabled(client: MongoClient, report_log: List[str], utils: Any) -> None:
     """
     Checks if MongoDB has authentication enabled (security.authorization).
     This is the MONGO-equivalent of CIS 3.1 (Windows Auth Mode).
@@ -69,7 +63,7 @@ def check_auth_enabled(client, report_log, utils):
     """
     format_check_result = utils.format_check_result
     
-    report_log.append("\n" + "-"*60)
+    report_log.append("\n" + "-" * SEPARATOR_LENGTH)
     report_log.append("--- Checking Authentication (MongoDB) ---")
     
     try:
@@ -92,14 +86,14 @@ def check_auth_enabled(client, report_log, utils):
             format_check_result("MongoDB Authentication", f"Error checking: {e}", "Check user permissions (requires admin role).", "WARN")
         )
 
-def check_network_binding(client, report_log, utils):
+def check_network_binding(client: MongoClient, report_log: List[str], utils: Any) -> None:
     """
     Checks if MongoDB is bound to localhost only.
     Results are added to the report_log list.
     """
     format_check_result = utils.format_check_result
     
-    report_log.append("\n" + "-"*60)
+    report_log.append("\n" + "-" * SEPARATOR_LENGTH)
     report_log.append("--- Checking Network Binding (MongoDB) ---")
     
     try:
@@ -121,7 +115,7 @@ def check_network_binding(client, report_log, utils):
             format_check_result("Network Binding", f"Error checking: {e}", "Check user permissions.", "WARN")
         )
 
-def check_tls_enabled(client, report_log, utils):
+def check_tls_enabled(client: MongoClient, report_log: List[str], utils: Any) -> None:
     """
     Checks if MongoDB requires TLS/SSL (net.tls.mode).
     This is the MONGO-equivalent of your TLS/SSL check.
@@ -129,7 +123,7 @@ def check_tls_enabled(client, report_log, utils):
     """
     format_check_result = utils.format_check_result
     
-    report_log.append("\n" + "-"*60)
+    report_log.append("\n" + "-" * SEPARATOR_LENGTH)
     report_log.append("--- Checking TLS/SSL (MongoDB) ---")
     
     try:
@@ -155,7 +149,7 @@ def check_tls_enabled(client, report_log, utils):
             format_check_result("TLS/SSL Mode", f"Error checking: {e}", "Check user permissions.", "WARN")
         )
 
-def check_audit_logging(client, report_log, utils):
+def check_audit_logging(client: MongoClient, report_log: List[str], utils: Any) -> None:
     """
     Checks if MongoDB has audit logging enabled.
     This is the MONGO-equivalent of CIS 5.4 and BNM RMiT S 10.61(b).
@@ -163,7 +157,7 @@ def check_audit_logging(client, report_log, utils):
     """
     format_check_result = utils.format_check_result
     
-    report_log.append("\n" + "-"*60)
+    report_log.append("\n" + "-" * SEPARATOR_LENGTH)
     report_log.append("--- Checking Audit Logging (MongoDB) ---")
     
     try:
@@ -186,14 +180,14 @@ def check_audit_logging(client, report_log, utils):
             format_check_result("Audit Logging", f"Error checking: {e}", "Check user permissions.", "WARN")
         )
 
-def check_auth_mechanisms(client, report_log, utils):
+def check_auth_mechanisms(client: MongoClient, report_log: List[str], utils: Any) -> None:
     """
     Checks for weak/deprecated authentication mechanisms.
     Results are added to the report_log list.
     """
     format_check_result = utils.format_check_result
     
-    report_log.append("\n" + "-"*60)
+    report_log.append("\n" + "-" * SEPARATOR_LENGTH)
     report_log.append("--- Checking Auth Mechanisms (MongoDB) ---")
     
     try:
