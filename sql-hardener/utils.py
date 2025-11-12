@@ -26,6 +26,6 @@ def format_check_result(title, status, recommendation="", level="INFO"):
     result_lines = []
     result_lines.append(f"{prefix} {title}: {status}")
     if recommendation:
-        result_lines.append(f" 	└── Recommendation: {recommendation}")
+        result_lines.append(f"  Recommendation: {recommendation}")
     
     return "\n".join(result_lines)

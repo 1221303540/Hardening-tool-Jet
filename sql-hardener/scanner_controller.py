@@ -70,7 +70,7 @@ class ScannerController:
         Runs in a separate thread.
         """
         try:
-            self.log(f"=== Starting {database_type.upper()} Security Scan ===\n")
+            self.log(f"Starting {database_type.upper()} Security Scan\n")
             self.update_progress(5)
             
             # Load the appropriate checker module
@@ -99,6 +99,38 @@ class ScannerController:
                 self.is_scanning = False
                 return
             
+            # Check if connection failed (report would contain CRITICAL connection error)
+            if technical_report_lines:
+                connection_failed = False
+                for line in technical_report_lines:
+                    if "[CRITICAL]" in line and ("connection error" in line.lower() or "authentication error" in line.lower()):
+                        connection_failed = True
+                        error_message = line.replace("[CRITICAL]", "").strip()
+                        break
+                
+                if connection_failed:
+                    self.log(f"\n[ERROR] {error_message}")
+                    self.log("Scan aborted due to connection failure.")
+                    if self.completion_callback:
+                        self.completion_callback({
+                            'status': 'error',
+                            'error': error_message
+                        })
+                    self.is_scanning = False
+                    return
+            
+            # Check if report is empty (no checks were run)
+            if not technical_report_lines or len(technical_report_lines) < 2:
+                error_msg = "No scan results generated. Connection may have failed or no checks were executed."
+                self.log(f"\n[ERROR] {error_msg}")
+                if self.completion_callback:
+                    self.completion_callback({
+                        'status': 'error',
+                        'error': error_msg
+                    })
+                self.is_scanning = False
+                return
+            
             self.update_progress(70)
             
             # Calculate risk metrics
@@ -121,18 +153,20 @@ class ScannerController:
                 
                 total_findings = total_crit + total_warn
             
-            self.log(f"\n{'='*60}")
-            self.log("### Quantitative Risk Analysis ###")
-            self.log(f"Total Risk Score: {risk_score} (CRIT={SCORE_CRITICAL}pts, WARN={SCORE_WARNING}pts)")
-            self.log(f"Total Findings: {total_findings} (Critical: {total_crit}, Warning: {total_warn})")
-            self.log(f"{'='*60}\n")
+            self.log("\n")
+            self.log("RISK SUMMARY")
+            self.log(f"Risk Score: {risk_score}")
+            self.log(f"Total Findings: {total_findings}")
+            self.log(f"Critical Issues: {total_crit}")
+            self.log(f"Warnings: {total_warn}")
+            self.log("")
             
             self.update_progress(80)
             
             # Generate AI summary if API key provided
             ai_summary = ""
             if api_key and technical_report_lines:
-                self.log("### AI-Powered Executive Summary ###")
+                self.log("\nEXECUTIVE SUMMARY")
                 self.log("Generating summary, please wait...\n")
                 
                 try:
@@ -176,7 +210,7 @@ class ScannerController:
                 scan_id = None
             
             self.update_progress(100)
-            self.log("\n=== Scan Complete ===")
+            self.log("\nScan Complete")
             
             # Prepare results dictionary
             results = {

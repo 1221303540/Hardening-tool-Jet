@@ -69,8 +69,7 @@ def check_auth_enabled(client, report_log, utils):
     """
     format_check_result = utils.format_check_result
     
-    report_log.append("\n" + "-"*60)
-    report_log.append("--- Checking Authentication (MongoDB) ---")
+    report_log.append("\nAuthentication Check")
     
     try:
         cmd_opts = client.admin.command("getCmdLineOpts")
@@ -99,8 +98,7 @@ def check_network_binding(client, report_log, utils):
     """
     format_check_result = utils.format_check_result
     
-    report_log.append("\n" + "-"*60)
-    report_log.append("--- Checking Network Binding (MongoDB) ---")
+    report_log.append("\nNetwork Binding Check")
     
     try:
         cmd_opts = client.admin.command("getCmdLineOpts")
@@ -129,8 +127,7 @@ def check_tls_enabled(client, report_log, utils):
     """
     format_check_result = utils.format_check_result
     
-    report_log.append("\n" + "-"*60)
-    report_log.append("--- Checking TLS/SSL (MongoDB) ---")
+    report_log.append("\nTLS/SSL Check")
     
     try:
         cmd_opts = client.admin.command("getCmdLineOpts")
@@ -163,8 +160,7 @@ def check_audit_logging(client, report_log, utils):
     """
     format_check_result = utils.format_check_result
     
-    report_log.append("\n" + "-"*60)
-    report_log.append("--- Checking Audit Logging (MongoDB) ---")
+    report_log.append("\nAudit Logging Check")
     
     try:
         cmd_opts = client.admin.command("getCmdLineOpts")
@@ -193,8 +189,7 @@ def check_auth_mechanisms(client, report_log, utils):
     """
     format_check_result = utils.format_check_result
     
-    report_log.append("\n" + "-"*60)
-    report_log.append("--- Checking Auth Mechanisms (MongoDB) ---")
+    report_log.append("\nAuthentication Mechanisms Check")
     
     try:
         # Get the 'authenticationMechanisms' parameter from the server

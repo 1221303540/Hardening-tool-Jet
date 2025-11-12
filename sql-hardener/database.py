@@ -117,29 +117,29 @@ def parse_technical_report(report_lines):
     current_check = None
     
     for line in report_lines:
-        line = line.strip()
+        line_stripped = line.strip()
         
-        # Skip separators and section headers
-        if line.startswith("---") or not line:
+        # Skip empty lines and section headers
+        if not line_stripped or ("Check" in line_stripped and line_stripped.endswith("Check")):
             continue
             
         # Parse findings with severity tags
-        if line.startswith("[CRIT]"):
+        if line_stripped.startswith("[CRIT]"):
             severity = "CRITICAL"
-            parts = line[6:].split(":", 1)
-        elif line.startswith("[WARN]"):
+            parts = line_stripped[6:].split(":", 1)
+        elif line_stripped.startswith("[WARN]"):
             severity = "WARNING"
-            parts = line[6:].split(":", 1)
-        elif line.startswith("[GOOD]"):
+            parts = line_stripped[6:].split(":", 1)
+        elif line_stripped.startswith("[GOOD]"):
             severity = "GOOD"
-            parts = line[6:].split(":", 1)
-        elif line.startswith("[INFO]"):
+            parts = line_stripped[6:].split(":", 1)
+        elif line_stripped.startswith("[INFO]"):
             severity = "INFO"
-            parts = line[6:].split(":", 1)
+            parts = line_stripped[6:].split(":", 1)
         else:
-            # Check for recommendations (indented lines)
-            if current_check and line.startswith("└──"):
-                rec_text = line.replace("└──", "").replace("Recommendation:", "").strip()
+            # Check for recommendations (now without └── )
+            if current_check and "Recommendation:" in line_stripped:
+                rec_text = line_stripped.replace("Recommendation:", "").strip()
                 current_check['recommendation'] = rec_text
             continue
         
@@ -152,7 +152,7 @@ def parse_technical_report(report_lines):
                 'severity': severity,
                 'status': status,
                 'recommendation': '',
-                'finding_text': line
+                'finding_text': line_stripped
             }
             findings.append(finding)
             current_check = finding

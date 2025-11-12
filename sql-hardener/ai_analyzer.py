@@ -27,24 +27,34 @@ def get_executive_summary(findings_list, risk_score, total_findings, total_crit,
         Act as a professional cybersecurity consultant reporting to a CISO.
         The following is a list of raw technical findings from an automated database scan.
         
-        Here is the quantitative analysis:
+        Quantitative Analysis:
         - Total Risk Score: {risk_score} (10 pts per Critical, 3 per Warning)
         - Total Findings: {total_findings}
         - Critical Findings: {total_crit}
         - Warning Findings: {total_warn}
 
-        Here is the list of raw technical findings:
-         {findings_text}\
-
-        Your task is to generate a 3-part executive summary in plain English. Avoid all technical jargon.
-
-        
-        1.  **Overall Risk Assessment:** Start with a single, clear classification: CRITICAL, HIGH, MEDIUM, or LOW. Address each findings in a tone as short as possible.
-        2.  **Key Risk Narrative:** Do not list all findings. Instead, identify the single most urgent attack vector. Explain *how* 2-3 of the findings *combine* to create a specific business risk (e.g., "Attackers can steal customer data because...") in short and concise terms.
-        3.  **Priority Action Plan:** List the urgent remediation steps from most urgent to non-urgent in a numbered list. Be short andspecific.
-
         Technical Findings:
         {findings_text}
+
+        Generate a 3-part executive summary in plain text format. Use simple, clear language without technical jargon.
+        DO NOT use markdown symbols, asterisks, hashtags, or special formatting characters.
+        
+        Format the output as follows:
+        
+        Overall Risk Level: [State CRITICAL, HIGH, MEDIUM, or LOW]
+        [Brief 2-3 sentence assessment]
+        
+        Key Risk:
+        [Describe the most urgent attack vector and how findings combine to create business risk]
+        
+        Priority Actions:
+        [List ALL necessary remediation actions based on the findings above]
+        [Rank them from MOST URGENT to LEAST URGENT]
+        [Use numbered list format: 1. action, 2. action, etc.]
+        [Include every critical and warning finding that requires action]
+        [Be specific and actionable for each item]
+        
+        Keep each action concise but complete.
         """
 
         response = model.generate_content(prompt)

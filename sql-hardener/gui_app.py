@@ -297,28 +297,139 @@ class DatabaseSecurityScannerGUI:
         if not api_key or 'YOUR_KEY_HERE' in api_key:
             api_key = None
         
+        # Test connection before starting scan
+        self.root.config(cursor="wait")
+        self.root.update()
+        
+        try:
+            test_result = self.test_connection(connection_params)
+            if not test_result['success']:
+                self.root.config(cursor="")
+                messagebox.showerror(
+                    "Connection Failed", 
+                    f"Cannot connect to database:\n\n{test_result['error']}\n\nPlease check your credentials and try again."
+                )
+                return
+        except Exception as e:
+            self.root.config(cursor="")
+            messagebox.showerror(
+                "Connection Test Failed", 
+                f"Failed to test connection:\n\n{str(e)}\n\nPlease check your credentials and try again."
+            )
+            return
+        
+        self.root.config(cursor="")
+        
         # Show scanning screen
         self.show_scanning_screen(connection_params, api_key)
     
+    def test_connection(self, connection_params):
+        """Test database connection before starting scan"""
+        if self.selected_db_type == 'mssql':
+            try:
+                import pyodbc
+                server = connection_params.get('server', '')
+                database = connection_params.get('database', 'master')
+                username = connection_params.get('username', '')
+                password = connection_params.get('password', '')
+                driver = connection_params.get('driver', '{ODBC Driver 18 for SQL Server}')
+                
+                conn_str = (
+                    f"DRIVER={driver};"
+                    f"SERVER={server};"
+                    f"DATABASE={database};"
+                    f"UID={username};"
+                    f"PWD={password};"
+                    "TrustServerCertificate=yes;"
+                )
+                
+                conn = pyodbc.connect(conn_str, timeout=10)
+                conn.close()
+                return {'success': True, 'error': None}
+            
+            except pyodbc.Error as e:
+                error_msg = str(e)
+                if "Login failed" in error_msg or "authentication failed" in error_msg.lower():
+                    return {'success': False, 'error': 'Authentication failed. Please check your username and password.'}
+                elif "server" in error_msg.lower() and "not found" in error_msg.lower():
+                    return {'success': False, 'error': 'Server not found. Please check the server address.'}
+                else:
+                    return {'success': False, 'error': error_msg}
+            except Exception as e:
+                return {'success': False, 'error': f'Connection error: {str(e)}'}
+        
+        elif self.selected_db_type == 'mongodb':
+            try:
+                from pymongo import MongoClient, errors
+                connection_string = connection_params.get('connection_string', '')
+                username = connection_params.get('username', None)
+                password = connection_params.get('password', None)
+                
+                # Create client with short timeout
+                client = MongoClient(
+                    connection_string,
+                    username=username if username else None,
+                    password=password if password else None,
+                    serverSelectionTimeoutMS=10000  # 10 second timeout
+                )
+                
+                # Test connection by pinging
+                client.admin.command('ping')
+                client.close()
+                return {'success': True, 'error': None}
+            
+            except errors.ServerSelectionTimeoutError:
+                return {'success': False, 'error': 'Connection timeout. Please check the connection string and ensure MongoDB is running.'}
+            except errors.OperationFailure as e:
+                error_msg = str(e)
+                if "authentication failed" in error_msg.lower() or "auth failed" in error_msg.lower():
+                    return {'success': False, 'error': 'Authentication failed. Please check your username and password.'}
+                else:
+                    return {'success': False, 'error': error_msg}
+            except errors.ConnectionFailure as e:
+                return {'success': False, 'error': f'Connection failed: {str(e)}'}
+            except Exception as e:
+                return {'success': False, 'error': f'Connection error: {str(e)}'}
+        
+        return {'success': False, 'error': 'Unknown database type'}
+    
     def validate_credentials(self):
         """Validate credential inputs"""
-        for field_name, entry in self.credential_entries.items():
-            if field_name == 'api_key':
-                continue
+        if self.selected_db_type == 'mssql':
+            # For MSSQL, server and username are required
+            server = self.credential_entries.get('server', None)
+            username = self.credential_entries.get('username', None)
+            password = self.credential_entries.get('password', None)
             
-            value = entry.get().strip()
+            if not server or not server.get().strip():
+                messagebox.showerror("Validation Error", "Server address is required for MS SQL Server connection.")
+                return False
             
-            # Check required fields
-            if field_name in ['username', 'server', 'connection_string'] and not value:
-                # Username and connection_string can be optional for MongoDB
-                if self.selected_db_type == 'mongodb' and field_name == 'username':
-                    continue
-                if field_name != 'server' or self.selected_db_type != 'mssql':
-                    continue
+            if not username or not username.get().strip():
+                messagebox.showerror("Validation Error", "Username is required for MS SQL Server connection.")
+                return False
             
-            if field_name == 'password':
-                # Password can be empty (will be handled by checker)
-                continue
+            if not password or not password.get().strip():
+                messagebox.showwarning("Warning", "Password is empty. Connection may fail if server requires authentication.")
+                # Allow to continue, but warn
+        
+        elif self.selected_db_type == 'mongodb':
+            # For MongoDB, connection string is required
+            connection_string = self.credential_entries.get('connection_string', None)
+            username = self.credential_entries.get('username', None)
+            password = self.credential_entries.get('password', None)
+            
+            if not connection_string or not connection_string.get().strip():
+                messagebox.showerror("Validation Error", "Connection string is required for MongoDB connection.")
+                return False
+            
+            # If username is provided, password should also be provided
+            if username and username.get().strip():
+                if not password or not password.get().strip():
+                    result = messagebox.askyesno("Warning", 
+                        "Username is provided but password is empty. Continue without password?")
+                    if not result:
+                        return False
         
         return True
     
@@ -425,9 +536,17 @@ class DatabaseSecurityScannerGUI:
     
     def stop_scan(self):
         """Stop the current scan"""
-        if self.scanner and self.scanner.is_scanning:
-            self.scanner.stop_scan()
-            self.stop_btn.config(state="disabled")
+        try:
+            if self.scanner and hasattr(self.scanner, 'is_scanning') and self.scanner.is_scanning:
+                self.scanner.stop_scan()
+                if hasattr(self, 'stop_btn') and self.stop_btn:
+                    self.stop_btn.config(state="disabled")
+                self.append_log("\n[INFO] Stopping scan...")
+            else:
+                self.append_log("\n[INFO] No active scan to stop.")
+        except Exception as e:
+            print(f"Error stopping scan: {e}")
+            messagebox.showerror("Error", f"Failed to stop scan: {str(e)}")
     
     def scan_completed(self, results):
         """Handle scan completion"""
@@ -675,29 +794,29 @@ class DatabaseSecurityScannerGUI:
         current_finding = None
         
         for line in report_lines:
-            line = line.strip()
+            line_stripped = line.strip()
             
-            # Skip separators and section headers
-            if line.startswith("---") or not line or line.startswith("==="):
+            # Skip empty lines and section headers
+            if not line_stripped or "Check" in line_stripped and line_stripped.endswith("Check"):
                 continue
             
             # Parse findings with severity tags
-            if line.startswith("[CRIT]"):
+            if line_stripped.startswith("[CRIT]"):
                 severity = "CRITICAL"
-                parts = line[6:].split(":", 1)
-            elif line.startswith("[WARN]"):
+                parts = line_stripped[6:].split(":", 1)
+            elif line_stripped.startswith("[WARN]"):
                 severity = "WARNING"
-                parts = line[6:].split(":", 1)
-            elif line.startswith("[GOOD]"):
+                parts = line_stripped[6:].split(":", 1)
+            elif line_stripped.startswith("[GOOD]"):
                 severity = "GOOD"
-                parts = line[6:].split(":", 1)
-            elif line.startswith("[INFO]"):
+                parts = line_stripped[6:].split(":", 1)
+            elif line_stripped.startswith("[INFO]"):
                 severity = "INFO"
-                parts = line[6:].split(":", 1)
+                parts = line_stripped[6:].split(":", 1)
             else:
-                # Check for recommendations
-                if current_finding and ("└──" in line or "Recommendation:" in line):
-                    rec_text = line.replace("└──", "").replace("Recommendation:", "").strip()
+                # Check for recommendations (now without └── )
+                if current_finding and "Recommendation:" in line_stripped:
+                    rec_text = line_stripped.replace("Recommendation:", "").strip()
                     current_finding['recommendation'] = rec_text
                 continue
             
@@ -733,9 +852,7 @@ class DatabaseSecurityScannerGUI:
         
         try:
             with open(filename, 'w', encoding='utf-8') as f:
-                f.write("="*80 + "\n")
-                f.write("DATABASE SECURITY SCAN REPORT\n")
-                f.write("="*80 + "\n\n")
+                f.write("DATABASE SECURITY SCAN REPORT\n\n")
                 
                 f.write(f"Database Type: {self.scan_results['database_type'].upper()}\n")
                 f.write(f"Target Server: {self.scan_results['target_server']}\n")
@@ -743,25 +860,19 @@ class DatabaseSecurityScannerGUI:
                 f.write(f"Scan ID: {self.scan_results.get('scan_id', 'N/A')}\n")
                 f.write(f"Username: {self.scan_results['username']}\n\n")
                 
-                f.write("="*80 + "\n")
-                f.write("RISK ASSESSMENT\n")
-                f.write("="*80 + "\n\n")
+                f.write("\nRISK ASSESSMENT\n\n")
                 
                 f.write(f"Risk Score: {self.scan_results['risk_score']}\n")
                 f.write(f"Total Findings: {self.scan_results['total_findings']}\n")
-                f.write(f"Critical: {self.scan_results['critical_count']}\n")
+                f.write(f"Critical Issues: {self.scan_results['critical_count']}\n")
                 f.write(f"Warnings: {self.scan_results['warning_count']}\n\n")
                 
-                f.write("="*80 + "\n")
-                f.write("EXECUTIVE SUMMARY\n")
-                f.write("="*80 + "\n\n")
+                f.write("\nEXECUTIVE SUMMARY\n\n")
                 
                 f.write(self.scan_results.get('ai_summary', 'No AI summary available'))
                 f.write("\n\n")
                 
-                f.write("="*80 + "\n")
-                f.write("TECHNICAL REPORT\n")
-                f.write("="*80 + "\n\n")
+                f.write("\nDETAILED FINDINGS\n\n")
                 
                 for line in self.scan_results.get('technical_report', []):
                     f.write(line + "\n")
